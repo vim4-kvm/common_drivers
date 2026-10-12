@@ -1337,6 +1337,15 @@ static int vfm_cap_recv_event_cb(int type, void *data, void *private_data)
 			u32 canvas_size = (u32)canvas_w * canvas_h;
 			u32 need_size = dev->sizeimage[0];
 
+			/* Semi-planar: chroma counts only when it directly
+			 * follows luma, since we export one contiguous plane.
+			 */
+			if (vf->plane_num == 2 &&
+			    vf->canvas0_config[1].phy_addr ==
+			    frame->phy_addr + canvas_size)
+				canvas_size += (u32)vf->canvas0_config[1].width *
+					       vf->canvas0_config[1].height;
+
 			if (canvas_w && canvas_h &&
 			    canvas_size + PAGE_SIZE <= need_size) {
 				unsigned long iflags;

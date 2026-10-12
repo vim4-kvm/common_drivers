@@ -5,7 +5,9 @@
  * retrieves DMA-buf fds via custom ioctl, mmaps them to verify
  * frame data is accessible, then QBUFs back.
  *
- * Usage: ./test_dmabuf [num_frames]
+ * Usage: ./test_dmabuf [num_frames] [device] [dump_file]
+ *
+ * If dump_file is given, the last frame is written there raw.
  *
  * Build (cross-compile):
  *   aarch64-poky-linux-gcc -o test_dmabuf test_dmabuf.c
@@ -46,6 +48,8 @@ int main(int argc, char **argv)
 {
 	int fd, ret, i;
 	int num_frames = 5;
+	const char *device = DEVICE;
+	const char *dump = NULL;
 	struct v4l2_format fmt;
 	struct v4l2_requestbuffers req;
 	struct v4l2_buffer buf;
@@ -54,9 +58,13 @@ int main(int argc, char **argv)
 
 	if (argc > 1)
 		num_frames = atoi(argv[1]);
+	if (argc > 2)
+		device = argv[2];
+	if (argc > 3)
+		dump = argv[3];
 
-	printf("Opening %s...\n", DEVICE);
-	fd = open(DEVICE, O_RDWR);
+	printf("Opening %s...\n", device);
+	fd = open(device, O_RDWR);
 	if (fd < 0) {
 		perror("open");
 		return 1;
@@ -202,6 +210,19 @@ int main(int argc, char **argv)
 				for (int j = 0; j < 256 && j < (int)dmabuf_req.size; j++)
 					if (p[j] != 0) nonzero++;
 				printf("  Non-zero bytes in first 256: %d\n", nonzero);
+
+				if (dump && i == num_frames - 1) {
+					FILE *f = fopen(dump, "wb");
+
+					if (f) {
+						fwrite(p, 1, dmabuf_req.size, f);
+						fclose(f);
+						printf("  Wrote %u bytes to %s\n",
+						       dmabuf_req.size, dump);
+					} else {
+						perror("  fopen dump");
+					}
+				}
 
 				munmap(frame_data, dmabuf_req.size);
 			} else {

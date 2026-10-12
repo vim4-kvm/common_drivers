@@ -938,16 +938,26 @@ void vdin_cma_release(struct vdin_dev_s *devp)
 	if (devp->cma_config_flag & MEM_ALLOC_DISCRETE) {
 		if (devp->cma_config_flag & MEM_ALLOC_FROM_CODEC) {
 			/* canvas or afbce paddr */
-			for (i = 0; i < devp->vf_mem_max_cnt; i++) {
+			/* Canvas setup may reduce vf_mem_max_cnt after allocation
+			 * (NV12/NV21 use two canvas IDs per frame). Release every
+			 * allocation, including buffers outside the active canvas set.
+			 */
+			for (i = 0; i < ARRAY_SIZE(devp->vf_codec_mem); i++) {
+				if (!devp->vf_codec_mem[i])
+					continue;
 				codec_mm_release(devp->vf_codec_mem[i], vdin_name);
 				devp->vf_codec_mem[i] = NULL;
 			}
 			pr_info("vdin%d codec cma release ok!\n", devp->index);
 		} else {
-			for (i = 0; i < devp->vf_mem_max_cnt; i++)
+			for (i = 0; i < ARRAY_SIZE(devp->vf_venc_pages); i++) {
+				if (!devp->vf_venc_pages[i])
+					continue;
 				dma_release_from_contiguous(&devp->this_pdev->dev,
 							    devp->vf_venc_pages[i],
 							    devp->frame_size >> PAGE_SHIFT);
+				devp->vf_venc_pages[i] = NULL;
+			}
 
 			pr_info("vdin%d cma release ok!\n", devp->index);
 		}

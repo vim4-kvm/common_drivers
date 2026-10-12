@@ -1487,6 +1487,13 @@ static int vdin_v4l2_release(struct file *file)
 		return -EFAULT;
 
 	if (devp->flags & VDIN_FLAG_DEC_STARTED) {
+		/* Decoder was started by someone else (tvin ioctl path or
+		 * another V4L2 fd): just drop this fd, keep capture running.
+		 */
+		if (devp->work_mode != VDIN_WORK_MD_V4L ||
+		    devp->vb_queue.owner != file->private_data)
+			return vb2_fop_release(file);
+
 		dprintk(0, "%s: DEC still started (unclean shutdown?), forcing stop\n",
 			__func__);
 		/* Stop hardware capture, clear flags, free IRQ, release CMA.

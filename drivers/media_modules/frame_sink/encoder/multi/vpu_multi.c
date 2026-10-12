@@ -364,10 +364,9 @@ static void vpu_clk_disable(struct vpu_clks *clks)
 	clk_disable_unprepare(clks->dos_apb_clk);
 	clk_disable_unprepare(clks->dos_clk);
 	/* the power off */
-	/* the power on */
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
 		enc_pr(LOG_INFO, "powering off wave521 for t7\n");
-		vdec_poweron(VDEC_WAVE);
+		vdec_poweroff(VDEC_WAVE);
 		mdelay(5);
 		enc_pr(LOG_INFO, "wave power stauts after poweroff: %d\n", vdec_on(VDEC_WAVE));
 	} else {

@@ -2474,13 +2474,10 @@ static void crg_ep_struct_setup(struct crg_gadget_dev *crg_udc,
 		ep->usb_ep.caps.type_iso = 1;
 		ep->usb_ep.caps.type_bulk = 1;
 		ep->usb_ep.caps.type_int = 1;
-		ep->usb_ep.caps.dir_in = 1;
 		ep->usb_ep.caps.type_control = 1;
-
-		ep->usb_ep.caps.type_iso = 1;
-		ep->usb_ep.caps.type_bulk = 1;
-		ep->usb_ep.caps.type_int = 1;
-		ep->usb_ep.caps.type_control = 1;
+		/* Each context has a fixed direction. Advertising OUT contexts as
+		 * IN lets autoconfiguration allocate two endpoints at one address.
+		 */
 		if (ep->DCI % 2)
 			ep->usb_ep.caps.dir_out = 1;
 		else

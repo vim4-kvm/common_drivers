@@ -5953,6 +5953,7 @@ static const struct match_data_s vdin_dt_t7 = {
 	.de_tunnel_tunnel = 0, /*0,1*/	.ipt444_to_422_12bit = 0, /*0,1*/
 	.vdin0_line_buff_size = 0x780,	.vdin1_line_buff_size = 0x780,
 	.vdin0_max_w_h = VDIN_4K_SIZE,	.vdin1_set_hdr = true,
+	.vdin0_set_hdr = true,
 };
 
 static const struct match_data_s vdin_dt_s4 = {

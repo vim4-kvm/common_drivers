@@ -1875,12 +1875,40 @@ vdin_set_color_matrix(enum vdin_matrix_sel_e matrix_sel, unsigned int offset,
 	return matrix_csc;
 }
 
+static enum vd_format_e vdin_hdmi_signal_format(struct vdin_dev_s *devp)
+{
+	if (devp->prop.hdr10p_info.hdr10p_on)
+		return SIGNAL_HDR10PLUS;
+	if (!devp->prop.vdin_hdr_flag)
+		return SIGNAL_SDR;
+	if (devp->prop.hdr_info.hdr_data.eotf == EOTF_HLG)
+		return SIGNAL_HLG;
+	return SIGNAL_HDR10;
+}
+
 void vdin_set_hdr(struct vdin_dev_s *devp)
 {
 	enum vd_format_e video_format;
+	unsigned int hdr_module = VDIN1_HDR;
 
-	if (devp->index == 0 || !devp->dtdata->vdin1_set_hdr ||
-		devp->debug.vdin1_set_hdr_bypass)
+	if (devp->debug.vdin1_set_hdr_bypass)
+		return;
+
+	/*
+	 * T7 VDIN0 has its own HDR2 core. Tone-map HDMI input to SDR there so
+	 * 8-bit capture of an HDR source is not washed out. The vframe
+	 * signal_type still describes the source, so a display path that
+	 * needs HDR passthrough must set vdin1_bypass_hdr on vdin0.
+	 */
+	if (devp->index == 0) {
+		if (!devp->dtdata->vdin0_set_hdr || !IS_HDMI_SRC(devp->parm.port))
+			return;
+		hdr_module = VDIN0_HDR;
+		video_format = vdin_hdmi_signal_format(devp);
+		goto set_hdr;
+	}
+
+	if (!devp->dtdata->vdin1_set_hdr)
 		return;
 
 	switch (devp->parm.port) {
@@ -1911,6 +1939,7 @@ void vdin_set_hdr(struct vdin_dev_s *devp)
 		break;
 	}
 
+set_hdr:
 #ifdef CONFIG_AMLOGIC_MEDIA_ENHANCEMENT_DOLBYVISION
 	if (for_amdv_certification()) {
 		/*not modify data*/
@@ -1919,7 +1948,7 @@ void vdin_set_hdr(struct vdin_dev_s *devp)
 #endif
 
 #ifndef VDIN_BRINGUP_NO_AMLVECM
-	pr_info("%s fmt:%d\n", __func__, video_format);
+	pr_info("%s vdin%d fmt:%d\n", __func__, devp->index, video_format);
 	switch (video_format) {
 	case SIGNAL_HDR10:
 	case SIGNAL_HDR10PLUS:
@@ -1928,17 +1957,17 @@ void vdin_set_hdr(struct vdin_dev_s *devp)
 		 * 2nd, process sel: bit1=HDR_SDR
 		 * bit11=HDR10P_SDR
 		 */
-		hdr_set(VDIN1_HDR, HDR_SDR, VPP_TOP0);
+		hdr_set(hdr_module, HDR_SDR, VPP_TOP0);
 		break;
 
 	case SIGNAL_SDR:
 		/* HDR_BYPASS(bit0) | HLG_BYPASS(bit3) */
-		hdr_set(VDIN1_HDR, HDR_BYPASS | HLG_BYPASS, VPP_TOP0);
+		hdr_set(hdr_module, HDR_BYPASS | HLG_BYPASS, VPP_TOP0);
 		break;
 
 	case SIGNAL_HLG:
 		/* HLG_SDR(bit4) */
-		hdr_set(VDIN1_HDR, HLG_SDR, VPP_TOP0);
+		hdr_set(hdr_module, HLG_SDR, VPP_TOP0);
 		break;
 
 	/* VDIN DON'T support dv loopback currently */

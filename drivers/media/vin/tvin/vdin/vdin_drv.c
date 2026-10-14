@@ -3446,6 +3446,13 @@ irqreturn_t vdin_isr(int irq, void *dev_id)
 		vdin_afbce_mode_update(devp);
 #endif
 
+	/* Coalesce previews at the frame boundary under isr_lock. If capture is
+	 * stopped, the request stays pending until frames resume. xchg preserves
+	 * a new request arriving while this one is being applied.
+	 */
+	if (xchg(&devp->hdr_reload_pending, false))
+		vdin_set_hdr(devp);
+
 	/* change color matrix */
 	if (devp->csc_cfg != 0) {
 		prop = &devp->prop;

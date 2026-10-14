@@ -962,6 +962,8 @@ struct vdin_dev_s {
 #endif
 	/* bit0: enable/disable; bit4: luma range info */
 	bool csc_cfg;
+	/* Consumed by the capture ISR, alongside signal-driven HDR updates. */
+	bool hdr_reload_pending;
 	/* duration of current timing */
 	unsigned int duration;
 	/* color-depth for vdin write */

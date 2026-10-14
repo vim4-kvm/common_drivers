@@ -4225,14 +4225,11 @@ start_chk:
 		pr_info("vdin1_set_bypass:%d\n", devp->debug.vdin1_set_hdr_bypass);
 	} else if (!strcmp(parm[0], "reload_hdr")) {
 		/*
-		 * Reload the HDR core LUTs (e.g. am_vecm oo_y_lut_hdr_sdr) while
-		 * decoding, without restarting the input. hdr_set() queues the
-		 * writes for the next vsync.
+		 * VDIN HDR register writes are immediate, not RDMA queued.
+		 * Leave them to the capture ISR so a userspace preview cannot
+		 * interrupt signal-driven configuration and corrupt shared LUTs.
 		 */
-		if (devp->flags & VDIN_FLAG_DEC_STARTED)
-			vdin_set_hdr(devp);
-		else
-			pr_info("reload_hdr: vdin%d not started\n", devp->index);
+		WRITE_ONCE(devp->hdr_reload_pending, true);
 	} else if (!strcmp(parm[0], "rv")) {
 		if (parm[1] && (kstrtouint(parm[1], 16, &temp) == 0))
 			pr_info("addr:0x%x val:0x%x\n", temp, R_VCBUS(temp));

@@ -239,6 +239,7 @@ void vdin_set_chroma_canvas_id(struct vdin_dev_s *devp,
 void vdin_set_crc_pulse(struct vdin_dev_s *devp);
 void vdin_enable_module(struct vdin_dev_s *devp, bool enable);
 void vdin_set_matrix(struct vdin_dev_s *devp);
+void vdin_set_hdr(struct vdin_dev_s *devp);
 void vdin_select_matrix(struct vdin_dev_s *devp, unsigned char no,
 		      enum vdin_format_convert_e csc);
 bool vdin_check_cycle(struct vdin_dev_s *devp);

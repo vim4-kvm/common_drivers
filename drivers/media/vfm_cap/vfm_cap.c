@@ -442,6 +442,9 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 	} else if (bd_y >= 10 && (vf->type & VIDTYPE_VIU_422)) {
 		/* 10-bit 422 in non-full-pack mode — report same fourcc */
 		pixfmt = V4L2_PIX_FMT_AML_YUV422_10BIT;
+	} else if (bd_y == 8 && (vf->type & VIDTYPE_VIU_444) &&
+		   !(vf->type & VIDTYPE_RGB_444)) {
+		pixfmt = V4L2_PIX_FMT_AML_VUY24;
 	} else if (vf->type & VIDTYPE_VIU_NV21) {
 		pixfmt = V4L2_PIX_FMT_NV21;
 	} else if (vf->type & VIDTYPE_VIU_NV12) {
@@ -469,6 +472,12 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 	dev->bitdepth_y = bd_y;
 
 	switch (pixfmt) {
+	case V4L2_PIX_FMT_AML_VUY24:
+		dev->num_planes = 1;
+		bpl = max(w * 3, vf->canvas0_config[0].width);
+		dev->bytesperline[0] = bpl;
+		dev->sizeimage[0] = PAGE_ALIGN(bpl * h);
+		break;
 	case V4L2_PIX_FMT_AML_YUV422_10BIT:
 		/*
 		 * Amlogic 40-bit packed: 2 pixels in 5 bytes.
@@ -1274,7 +1283,7 @@ static int vfm_cap_recv_event_cb(int type, void *data, void *private_data)
 		if (!dev->draining) {
 			spin_lock(&dev->consumer_spin);
 			list_for_each_entry(cons, &dev->consumers, list) {
-				if (cons->streaming)
+				if (READ_ONCE(cons->streaming))
 					num_streaming++;
 			}
 			spin_unlock(&dev->consumer_spin);
@@ -1596,8 +1605,10 @@ static int vfm_cap_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	vfm_cap_info("consumer %u start streaming (bufs=%u)\n",
 		     cons->id, count);
-	cons->streaming = true;
+	mutex_lock(&cons->dev->consumer_lock);
+	WRITE_ONCE(cons->streaming, true);
 	cons->frame_count = 0;
+	mutex_unlock(&cons->dev->consumer_lock);
 	return 0;
 }
 
@@ -1608,7 +1619,9 @@ static void vfm_cap_stop_streaming(struct vb2_queue *vq)
 	unsigned long flags;
 
 	vfm_cap_info("consumer %u stop streaming\n", cons->id);
-	cons->streaming = false;
+	/* Wait for an in-flight export before returning or freeing its token. */
+	mutex_lock(&cons->dev->consumer_lock);
+	WRITE_ONCE(cons->streaming, false);
 
 	/* Return all queued buffers to userspace with ERROR state */
 	spin_lock_irqsave(&cons->queue_lock, flags);
@@ -1624,11 +1637,21 @@ static void vfm_cap_stop_streaming(struct vb2_queue *vq)
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 	}
 	spin_unlock_irqrestore(&cons->queue_lock, flags);
+	mutex_unlock(&cons->dev->consumer_lock);
 }
 
-static void vfm_cap_buf_finish(struct vb2_buffer *vb)
+static void vfm_cap_buf_cleanup(struct vb2_buffer *vb)
 {
-	/* No-op: DMA-buf cleanup happens in buf_queue (re-queue) or stop_streaming */
+	struct vfm_cap_buffer *buf = to_vfm_cap_buffer(to_vb2_v4l2_buffer(vb));
+
+	/* DONE/dequeued buffers are no longer on queued_list. Drop the token's
+	 * export reference too; independently exported fds remain valid. */
+	if (buf->dbuf) {
+		dma_buf_put(buf->dbuf);
+		buf->dbuf = NULL;
+	}
+	buf->frame = NULL;
+	buf->dbuf_fd = -1;
 }
 
 static const struct vb2_ops vfm_cap_vb2_ops = {
@@ -1636,7 +1659,7 @@ static const struct vb2_ops vfm_cap_vb2_ops = {
 	.buf_init        = vfm_cap_buf_init,
 	.buf_prepare     = vfm_cap_buf_prepare,
 	.buf_queue       = vfm_cap_buf_queue,
-	.buf_finish      = vfm_cap_buf_finish,
+	.buf_cleanup     = vfm_cap_buf_cleanup,
 	.start_streaming = vfm_cap_start_streaming,
 	.stop_streaming  = vfm_cap_stop_streaming,
 	.wait_prepare    = vb2_ops_wait_prepare,
@@ -1663,6 +1686,7 @@ static int vfm_cap_enum_fmt(struct file *file, void *fh,
 		V4L2_PIX_FMT_NV12,
 		V4L2_PIX_FMT_UYVY,
 		V4L2_PIX_FMT_AML_YUV422_10BIT,
+		V4L2_PIX_FMT_AML_VUY24,
 	};
 
 	if (f->index >= ARRAY_SIZE(formats))

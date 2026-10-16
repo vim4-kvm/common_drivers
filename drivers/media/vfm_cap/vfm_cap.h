@@ -42,6 +42,8 @@
 #include <linux/amlogic/media/vfm/vframe_receiver.h>
 
 #define VFM_CAP_MODULE_NAME	"vfm_cap"
+/* VDIN no_swap_en=1: packed Cr, Cb, Y bytes, no subsampling. */
+#define V4L2_PIX_FMT_AML_VUY24 v4l2_fourcc('V', 'U', 'Y', '3')
 #define VFM_CAP_MAX_CONSUMERS	4
 #define VFM_CAP_POOL_SIZE	16	/* max vframes in flight */
 #define VFM_CAP_NAME_SIZE	32

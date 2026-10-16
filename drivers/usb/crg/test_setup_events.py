@@ -34,7 +34,7 @@ struct usb_ctrlrequest { unsigned int unused; };
 struct event_trb_s { unsigned int dw0, dw1, dw2, dw3; };
 struct crg_gadget_dev {
     int device_state, portsc_on_reconnecting, setup_status;
-    bool status_pending;
+    bool status_pending, async_cb_flag;
     int setups, completions, deferred, ports;
 };
 static int crg_handle_port_status(struct crg_gadget_dev *d, unsigned long f)
@@ -67,6 +67,7 @@ int main(void)
         .device_state = USB_STATE_RECONNECTING,
         .setup_status = WAIT_FOR_SETUP,
         .status_pending = true,
+        .async_cb_flag = true,
     };
     /* A reset resets setup_status before the old EP0 request is retired. */
     for (int i = 0; i < 20; i++)
@@ -88,9 +89,19 @@ int main(void)
 
     /* Detached/powered controllers must not start control transfers. */
     for (int state = 0; state < USB_STATE_DEFAULT; state++) {
-        struct crg_gadget_dev idle = { .device_state = state };
+        struct crg_gadget_dev idle = { .device_state = state, .async_cb_flag = true };
         crg_udc_handle_event(&idle, &setup, 0);
         assert(idle.setups == 0 && idle.deferred == 0);
+    }
+    /* Unbind may disable callbacks before the device state changes. No
+     * status/stall request may be submitted across controller teardown. */
+    for (int state = USB_STATE_DEFAULT; state <= USB_STATE_CONFIGURED; state++) {
+        struct crg_gadget_dev unbinding = { .device_state = state,
+                                           .status_pending = true };
+        crg_udc_handle_event(&unbinding, &setup, 0);
+        assert(unbinding.setups == 0 && unbinding.deferred == 0);
+        crg_udc_handle_event(&unbinding, &complete, 0);
+        assert(!unbinding.status_pending && unbinding.completions == 1);
     }
     puts("EP0 reset/setup event regression passed");
     return 0;

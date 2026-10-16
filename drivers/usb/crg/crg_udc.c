@@ -2986,7 +2986,7 @@ void crg_udc_reinit(struct crg_gadget_dev *crg_udc, unsigned long flags)
 
 	crg_udc_clear_portpm(crg_udc);
 
-	if (crg_udc->gadget_driver) {
+	if (crg_udc->async_cb_flag && crg_udc->gadget_driver) {
 		CRG_DEBUG("calling disconnect\n");
 		spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
 		crg_udc->gadget_driver->disconnect(&crg_udc->gadget);
@@ -3133,10 +3133,10 @@ static int crg_gadget_stop(struct usb_gadget *g)
 
 	crg_udc = gadget_to_udc(g);
 
-	crg_udc->device_state = USB_STATE_ATTACHED;
 	crg_vbus_detect(crg_udc, 0);
 
 	spin_lock_irqsave(&crg_udc->udc_lock, flags);
+	crg_udc->device_state = USB_STATE_ATTACHED;
 
 	crg_reg_dump(crg_udc);
 
@@ -3158,9 +3158,12 @@ static int crg_gadget_stop(struct usb_gadget *g)
 static void crg_gadget_async_callbacks(struct usb_gadget *gadget, bool enable)
 {
 	struct crg_gadget_dev *crg_udc = &crg_udc_dev;
+	unsigned long flags;
 
 	CRG_ERROR("%s get state %d\n", __func__, enable);
+	spin_lock_irqsave(&crg_udc->udc_lock, flags);
 	crg_udc->async_cb_flag = enable;
+	spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
 }
 
 static const struct usb_gadget_ops crg_gadget_ops = {
@@ -3712,6 +3715,10 @@ void crg_handle_setup_pkt(struct crg_gadget_dev *crg_udc,
 	u16 wLength = setup_pkt->wLength;
 	u64 wData = 0;
 
+	/* Also covers SETUP dispatched from a tag-mismatch completion. */
+	if (!crg_udc->async_cb_flag)
+		return;
+
 	CRG_DEBUG("bRequest=0x%x, wValue=0x%.4x, wIndex=0x%x, wLength=%d\n",
 			setup_pkt->bRequest, wValue, wIndex, wLength);
 
@@ -3822,13 +3829,6 @@ void crg_handle_setup_pkt(struct crg_gadget_dev *crg_udc,
 			DATA_STAGE_XFER :  DATA_STAGE_RECV;
 	}
 	spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
-	if (!crg_udc->async_cb_flag) {
-		CRG_ERROR("crg gadget setup pkt coming too quick!\n");
-		spin_lock_irqsave(&crg_udc->udc_lock, flags);
-		if (list_empty(&crg_udc->udc_ep[0].queue))
-			set_ep0_halt(crg_udc);
-		return;
-	}
 	if (crg_udc->gadget_driver->setup(&crg_udc->gadget, setup_pkt) < 0) {
 		spin_lock_irqsave(&crg_udc->udc_lock, flags);
 		set_ep0_halt(crg_udc);
@@ -4251,7 +4251,8 @@ int crg_handle_port_status(struct crg_gadget_dev *crg_udc, unsigned long flags)
 					crg_udc->setup_tag_mismatch_found = 0;
 					crg_udc_reset(crg_udc, flags);
 
-					if (crg_udc->gadget_driver->disconnect) {
+					if (crg_udc->async_cb_flag && crg_udc->gadget_driver &&
+					    crg_udc->gadget_driver->disconnect) {
 						spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
 						crg_udc->gadget_driver->disconnect
 							(&crg_udc->gadget);
@@ -4267,7 +4268,8 @@ int crg_handle_port_status(struct crg_gadget_dev *crg_udc, unsigned long flags)
 				pdebug("cable disconnected, rst controller\n");
 
 				crg_udc_reset(crg_udc, flags);
-				if (crg_udc->gadget_driver->disconnect) {
+				if (crg_udc->async_cb_flag && crg_udc->gadget_driver &&
+				    crg_udc->gadget_driver->disconnect) {
 					spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
 					crg_udc->gadget_driver->disconnect(&crg_udc->gadget);
 					spin_lock_irqsave(&crg_udc->udc_lock, flags);
@@ -4294,7 +4296,8 @@ int crg_handle_port_status(struct crg_gadget_dev *crg_udc, unsigned long flags)
 			reg_write(&uccr->portsc, tmp);
 			CRG_DEBUG("pls to 0, write portsc 0x%x\n", tmp);
 		}  else if (CRG_U3DC_PORTSC_PLS_GET(tmp) == 0x3) {
-			if (crg_udc->gadget_driver->disconnect) {
+			if (crg_udc->async_cb_flag && crg_udc->gadget_driver &&
+			    crg_udc->gadget_driver->disconnect) {
 				spin_unlock_irqrestore(&crg_udc->udc_lock, flags);
 				if (eltest_flag == 0) {
 					if (crg_udc->crg_gadget_lock.wakesrc)
@@ -4347,7 +4350,8 @@ int crg_udc_handle_event(struct crg_gadget_dev *crg_udc,
 			 * second time. Keep consuming old completion events, but do
 			 * not accept SETUP until enable_setup() publishes DEFAULT.
 			 */
-			if (crg_udc->device_state < USB_STATE_DEFAULT)
+			if (!crg_udc->async_cb_flag ||
+			    crg_udc->device_state < USB_STATE_DEFAULT)
 				break;
 
 			setup_pkt = (struct usb_ctrlrequest *)&event->dw0;
@@ -4500,6 +4504,10 @@ int crg_gadget_irq_init(struct platform_device *pdev)
 		return -ENODEV;
 
 	crg_udc->irq = irq;
+	/* UDC core synchronizes this IRQ after disabling async callbacks,
+	 * before unbind/stop can reset EP0 and release gadget state.
+	 */
+	crg_udc->gadget.irq = irq;
 
 	retval = request_irq(irq, crg_udc_common_irq,
 			     IRQF_SHARED, "crg_udc",

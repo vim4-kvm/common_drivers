@@ -4341,11 +4341,14 @@ int crg_udc_handle_event(struct crg_gadget_dev *crg_udc,
 
 			CRG_DEBUG("handle_setup_pkt(%d)\n", crg_udc->device_state);
 
-			//if (crg_udc->device_state < USB_STATE_DEFAULT) {
-			//	CRG_ERROR("%s state(%d) < DEFAULT!\n",
-			//		__func__, crg_udc->device_state);
-			//	break;
-			//}
+			/* During reconnect, EP0 still owns the old requests until
+			 * prepare_for_setup() drains the event rings and reinitializes
+			 * EP0. Processing SET_ADDRESS here would queue status_req a
+			 * second time. Keep consuming old completion events, but do
+			 * not accept SETUP until enable_setup() publishes DEFAULT.
+			 */
+			if (crg_udc->device_state < USB_STATE_DEFAULT)
+				break;
 
 			setup_pkt = (struct usb_ctrlrequest *)&event->dw0;
 

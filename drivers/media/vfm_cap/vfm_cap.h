@@ -61,6 +61,9 @@
  * The DMA-buf fd MUST be closed before VIDIOC_QBUF of the same buffer.
  * The fd holds a reference on the vdin0 frame; closing it allows the
  * frame to be recycled back to vdin0.
+ * CPU mappings are read-only and cacheable. Bracket reads with
+ * DMA_BUF_IOCTL_SYNC START/END | READ; writes are not supported because
+ * multiple consumers may hold the same completed capture frame.
  *
  * Input/output: struct vfm_cap_dmabuf_req (index in, fd + size out)
  */
@@ -163,6 +166,9 @@ struct vfm_cap_dmabuf {
 	size_t			size;
 	struct cap_frame	*frame;
 	struct vfm_cap_dev	*dev;
+	struct mutex		cpu_lock;
+	dma_addr_t		cpu_dma_addr;
+	bool			cpu_mapped;
 };
 
 /**

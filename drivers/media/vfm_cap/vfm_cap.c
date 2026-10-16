@@ -281,6 +281,10 @@ static void vfm_cap_dmabuf_release(struct dma_buf *dbuf)
 	struct vfm_cap_dmabuf *priv = dbuf->priv;
 
 	if (priv) {
+		if (priv->cpu_mapped)
+			dma_unmap_page_attrs(v4l_get_dev_from_codec_mm(),
+				priv->cpu_dma_addr, PAGE_ALIGN(priv->size),
+				DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
 		/*
 		 * Release the cap_frame reference held by this DMA-buf.
 		 * If this was the last reference, the vframe is recycled
@@ -296,24 +300,83 @@ static void vfm_cap_dmabuf_release(struct dma_buf *dbuf)
 	}
 }
 
+/* Create the cache-maintenance mapping lazily: hardware-only consumers keep
+ * their existing zero-copy path without per-frame CPU cache maintenance. */
+static int vfm_cap_dmabuf_begin_cpu_access(struct dma_buf *dbuf,
+					 enum dma_data_direction direction)
+{
+	struct vfm_cap_dmabuf *priv = dbuf->priv;
+	struct device *device = v4l_get_dev_from_codec_mm();
+	int ret = 0;
+
+	/* Capture frames are shared with other consumers and are read-only. */
+	if (direction != DMA_FROM_DEVICE)
+		return -EACCES;
+	mutex_lock(&priv->cpu_lock);
+	if (!priv->cpu_mapped) {
+		dma_addr_t addr = dma_map_page_attrs(device,
+			phys_to_page(priv->paddr), 0, PAGE_ALIGN(priv->size),
+			DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+
+		if (dma_mapping_error(device, addr)) {
+			ret = -ENOMEM;
+			goto out;
+		}
+		/* VDIN already wrote this physical allocation. A bounce mapping
+		 * would synchronize a different allocation and cannot be used. */
+		if (addr != priv->paddr) {
+			dma_unmap_page_attrs(device, addr, PAGE_ALIGN(priv->size),
+				DMA_FROM_DEVICE, DMA_ATTR_SKIP_CPU_SYNC);
+			ret = -EOPNOTSUPP;
+			goto out;
+		}
+		priv->cpu_dma_addr = addr;
+		/* This export pins an immutable completed frame until release.
+		 * Invalidate once, not again for mmap after SYNC_START or repeated
+		 * read-only access. Recycled frames get a new export and invalidate. */
+		dma_sync_single_for_cpu(device, addr,
+			PAGE_ALIGN(priv->size), DMA_FROM_DEVICE);
+		priv->cpu_mapped = true;
+	}
+out:
+	mutex_unlock(&priv->cpu_lock);
+	return ret;
+}
+
+static int vfm_cap_dmabuf_end_cpu_access(struct dma_buf *dbuf,
+				       enum dma_data_direction direction)
+{
+	/* CPU mappings cannot be written, so there are no dirty lines to flush.
+	 * The next export's begin_cpu_access invalidates after VDIN writes. */
+	return direction == DMA_FROM_DEVICE ? 0 : -EACCES;
+}
+
 static int vfm_cap_dmabuf_mmap(struct dma_buf *dbuf,
 			       struct vm_area_struct *vma)
 {
 	struct vfm_cap_dmabuf *priv = dbuf->priv;
+	unsigned long length = vma->vm_end - vma->vm_start;
+	unsigned long pages;
+	int ret;
 
 	if (!priv || !priv->paddr)
 		return -EINVAL;
+	pages = PAGE_ALIGN(priv->size) >> PAGE_SHIFT;
 
-	/*
-	 * Map the CMA physical pages into userspace with write-combine.
-	 * This is used for debug/test only (e.g., demo program reads
-	 * one frame). Normal consumers use the DMA-buf fd for hardware
-	 * import (Vulkan, encoder, etc.) and never mmap.
-	 */
-	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	if (vma->vm_flags & VM_WRITE)
+		return -EACCES;
+	if (vma->vm_pgoff >= pages ||
+	    (length >> PAGE_SHIFT) > pages - vma->vm_pgoff)
+		return -EINVAL;
+	vma->vm_flags &= ~VM_MAYWRITE;
+	/* Cacheable read-only pages. Ensure the initial invalidation also runs
+	 * for callers that map a freshly exported frame before SYNC_START. */
+	ret = vfm_cap_dmabuf_begin_cpu_access(dbuf, DMA_FROM_DEVICE);
+	if (ret)
+		return ret;
 	return remap_pfn_range(vma, vma->vm_start,
-			       page_to_pfn(phys_to_page(priv->paddr)),
-			       PAGE_ALIGN(priv->size),
+			       page_to_pfn(phys_to_page(priv->paddr)) + vma->vm_pgoff,
+			       length,
 			       vma->vm_page_prot);
 }
 
@@ -324,6 +387,8 @@ static const struct dma_buf_ops vfm_cap_dmabuf_ops = {
 	.unmap_dma_buf = vfm_cap_dmabuf_unmap,
 	.release      = vfm_cap_dmabuf_release,
 	.mmap         = vfm_cap_dmabuf_mmap,
+	.begin_cpu_access = vfm_cap_dmabuf_begin_cpu_access,
+	.end_cpu_access = vfm_cap_dmabuf_end_cpu_access,
 };
 
 /**
@@ -354,6 +419,7 @@ static struct dma_buf *vfm_cap_export_frame_dmabuf(struct vfm_cap_dev *dev,
 	priv->size = frame->buf_size;
 	priv->frame = frame;
 	priv->dev = dev;
+	mutex_init(&priv->cpu_lock);
 
 	exp_info.ops = &vfm_cap_dmabuf_ops;
 	exp_info.size = PAGE_ALIGN(frame->buf_size);

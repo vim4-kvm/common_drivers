@@ -90,6 +90,28 @@ int main(int argc, char **argv)
 		check(ioctl(exported.fd, DMA_BUF_IOCTL_SYNC, &sync), "SYNC START");
 		volatile uint8_t sample = *(uint8_t *)data;
 		(void)sample;
+		/* Cached capture mappings must stay read-only, even via private
+		 * mappings or a later mprotect, because consumers share the frame. */
+		void *writable = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+			MAP_PRIVATE, exported.fd, 0);
+		if (writable != MAP_FAILED ||
+		    mprotect(data, 4096, PROT_READ | PROT_WRITE) == 0) {
+			fprintf(stderr, "capture mapping unexpectedly writable\n");
+			return 1;
+		}
+		/* A page-sized submapping must honor its nonzero file offset. */
+		void *partial = mmap(NULL, 4096, PROT_READ, MAP_SHARED, exported.fd, 4096);
+		if (partial == MAP_FAILED) {
+			perror("partial mmap");
+			return 1;
+		}
+		for (unsigned i = 0; i < 4096; i++) {
+			if (((uint8_t *)partial)[i] != ((uint8_t *)data)[4096 + i]) {
+				fprintf(stderr, "partial mapping offset mismatch\n");
+				return 1;
+			}
+		}
+		check(munmap(partial, 4096), "munmap partial");
 		sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
 		check(ioctl(exported.fd, DMA_BUF_IOCTL_SYNC, &sync), "SYNC END");
 		check(munmap(data, exported.size), "munmap");

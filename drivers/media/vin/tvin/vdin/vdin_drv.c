@@ -909,6 +909,9 @@ static void vdin_vf_init(struct vdin_dev_s *devp)
 			vf->flag |= VFRAME_FLAG_GAME_MODE;
 		if (devp->vdin_pc_mode)
 			vf->flag |= VFRAME_FLAG_PC_MODE;
+		if (devp->set_canvas_manual == 1 || devp->cfg_dma_buf ||
+		    devp->work_mode == VDIN_WORK_MD_V4L || devp->dbg_no_swap_en)
+			vf->flag |= VFRAME_FLAG_VIDEO_LINEAR;
 		if (devp->dv_is_not_std || devp->debug.bypass_tunnel)
 			vf->type_ext |= VIDTYPE_EXT_BYPASS_DETUNNEL;
 		else

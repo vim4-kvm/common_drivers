@@ -439,6 +439,18 @@ int oo_y_lut_hdr_sdr[HDR2_OOTF_LUT_SIZE] = {
 module_param_array(oo_y_lut_hdr_sdr, int, &num_hdr_sdr_lut, 0664);
 MODULE_PARM_DESC(oo_y_lut_hdr_sdr, "\n num_hdr_sdr_lut\n");
 
+static int vdin_oo_y_lut_hdr_sdr[HDR2_OOTF_LUT_SIZE];
+static int num_vdin_hdr_sdr_lut;
+module_param_array(vdin_oo_y_lut_hdr_sdr, int, &num_vdin_hdr_sdr_lut, 0664);
+
+static const int *hdr_sdr_gain(enum hdr_module_sel module_sel)
+{
+	if ((module_sel == VDIN0_HDR || module_sel == VDIN1_HDR) &&
+	    READ_ONCE(num_vdin_hdr_sdr_lut) == HDR2_OOTF_LUT_SIZE)
+		return vdin_oo_y_lut_hdr_sdr;
+	return oo_y_lut_hdr_sdr;
+}
+
 int oo_y_lut_cuva_sdr[HDR2_OOTF_LUT_SIZE] = {
 	800, 800, 800, 800, 800, 800, 800, 800, 800, 800,
 	800, 800, 800, 800, 800, 800, 800, 800, 800, 800,
@@ -1252,6 +1264,17 @@ void eo_clip_proc(struct vframe_master_display_colour_s *master_info,
 	}
 }
 
+static bool vdin_precise_gamut(enum hdr_module_sel module_sel,
+			       const struct hdr_proc_mtx_param_s *params)
+{
+	return get_cpu_type() == MESON_CPU_MAJOR_ID_T7 &&
+		(module_sel == VDIN0_HDR || module_sel == VDIN1_HDR) &&
+		params->gmt_bit_mode &&
+		(params->p_sel & (HDR_SDR | HDR10P_SDR | HLG_SDR)) &&
+		!memcmp(params->mtx_gamut, ncl_2020_709_8bit,
+			sizeof(ncl_2020_709_8bit));
+}
+
 int calc_gmut_shift(struct hdr_proc_mtx_param_s *hdr_mtx_param)
 {
 	int gmut_shift = 11;
@@ -1993,6 +2016,11 @@ void set_hdr_matrix(enum hdr_module_sel module_sel,
 				hdr_mtx_param->mtx_gamut[i];
 		/* TODO: use hdr_mtx_param->gmut_shift directly */
 		gmut_shift = calc_gmut_shift(hdr_mtx_param);
+		if (vdin_precise_gamut(module_sel, hdr_mtx_param)) {
+			for (i = 0; i < 9; i++)
+				gmut_coef[i / 3][i % 3] = ncl_2020_709[i];
+			gmut_shift = (1 << 4) | 11;
+		}
 
 		for (i = 0; i < 3; i++)
 			c_gain_lim_coef[i] =
@@ -3264,7 +3292,7 @@ enum hdr_process_sel hdr_func(enum hdr_module_sel module_sel,
 		hdr_process_select & HDR10P_SDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++) {
 			hdr_lut_param.oetf_lut[i]  = oe_y_lut_sdr[i];
-			hdr_lut_param.ogain_lut[i] = oo_y_lut_hdr_sdr[i];
+			hdr_lut_param.ogain_lut[i] = hdr_sdr_gain(module_sel)[i];
 			if (i < HDR2_EOTF_LUT_SIZE) {
 				if (eo_gmt_bit_mode)
 					hdr_lut_param.eotf_lut[i] =
@@ -4471,7 +4499,7 @@ int hdr10p_ebzcurve_update(enum hdr_module_sel module_sel,
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++) {
 			if (!p_hdr10pgen_param)
 				hdr_lut_param.ogain_lut[i] =
-					oo_y_lut_hdr_sdr[i];
+					hdr_sdr_gain(module_sel)[i];
 			else
 				hdr_lut_param.ogain_lut[i] =
 				p_hdr10pgen_param->gain[i];
@@ -4578,7 +4606,7 @@ int hdr10_tm_update(enum hdr_module_sel module_sel,
 
 	if (hdr_process_select & HDR_SDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++)
-			hdr_lut_param.ogain_lut[i] = oo_y_lut_hdr_sdr[i];
+			hdr_lut_param.ogain_lut[i] = hdr_sdr_gain(module_sel)[i];
 		hdr_lut_param.lut_on = LUT_ON;
 	} else if (hdr_process_select & HDR_HDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++)
@@ -4759,7 +4787,7 @@ enum hdr_process_sel hdr10p_func(enum hdr_module_sel module_sel,
 	} else if (hdr_process_select & HDR10P_SDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++) {
 			hdr_lut_param.oetf_lut[i]  = oe_y_lut_sdr[i];
-			hdr_lut_param.ogain_lut[i] = oo_y_lut_hdr_sdr[i];
+			hdr_lut_param.ogain_lut[i] = hdr_sdr_gain(module_sel)[i];
 			if (i < HDR2_EOTF_LUT_SIZE) {
 				if (eo_gmt_bit_mode)
 					hdr_lut_param.eotf_lut[i] =
@@ -5420,7 +5448,7 @@ static int create_hdr_full_setting(enum hdr_module_sel module_sel,
 	} else if (hdr_process_select & HDR_SDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++) {
 			lut_param->oetf_lut[i]  = oe_y_lut_sdr[i];
-			lut_param->ogain_lut[i] = oo_y_lut_hdr_sdr[i];
+			lut_param->ogain_lut[i] = hdr_sdr_gain(module_sel)[i];
 			if (i < HDR2_EOTF_LUT_SIZE) {
 				if (eo_gmt_bit_mode)
 					lut_param->eotf_lut[i] =
@@ -5439,7 +5467,7 @@ static int create_hdr_full_setting(enum hdr_module_sel module_sel,
 	} else if (hdr_process_select & HDR10P_SDR) {
 		for (i = 0; i < HDR2_OETF_LUT_SIZE; i++) {
 			lut_param->oetf_lut[i]  = oe_y_lut_sdr[i];
-			lut_param->ogain_lut[i] = oo_y_lut_hdr_sdr[i];
+			lut_param->ogain_lut[i] = hdr_sdr_gain(module_sel)[i];
 			if (i < HDR2_EOTF_LUT_SIZE) {
 				if (eo_gmt_bit_mode)
 					lut_param->eotf_lut[i] =

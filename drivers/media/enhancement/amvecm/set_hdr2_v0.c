@@ -1264,6 +1264,17 @@ void eo_clip_proc(struct vframe_master_display_colour_s *master_info,
 	}
 }
 
+static bool vdin_precise_gamut(enum hdr_module_sel module_sel,
+			       const struct hdr_proc_mtx_param_s *params)
+{
+	return get_cpu_type() == MESON_CPU_MAJOR_ID_T7 &&
+		(module_sel == VDIN0_HDR || module_sel == VDIN1_HDR) &&
+		params->gmt_bit_mode &&
+		(params->p_sel & (HDR_SDR | HDR10P_SDR | HLG_SDR)) &&
+		!memcmp(params->mtx_gamut, ncl_2020_709_8bit,
+			sizeof(ncl_2020_709_8bit));
+}
+
 int calc_gmut_shift(struct hdr_proc_mtx_param_s *hdr_mtx_param)
 {
 	int gmut_shift = 11;
@@ -2005,6 +2016,11 @@ void set_hdr_matrix(enum hdr_module_sel module_sel,
 				hdr_mtx_param->mtx_gamut[i];
 		/* TODO: use hdr_mtx_param->gmut_shift directly */
 		gmut_shift = calc_gmut_shift(hdr_mtx_param);
+		if (vdin_precise_gamut(module_sel, hdr_mtx_param)) {
+			for (i = 0; i < 9; i++)
+				gmut_coef[i / 3][i % 3] = ncl_2020_709[i];
+			gmut_shift = (1 << 4) | 11;
+		}
 
 		for (i = 0; i < 3; i++)
 			c_gain_lim_coef[i] =

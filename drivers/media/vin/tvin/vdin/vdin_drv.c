@@ -3868,6 +3868,48 @@ static void vdin_handle_hdcp_chg(struct vdin_dev_s *devp)
 	}
 }
 
+static bool vdin_update_shared_hdmi(struct vdin_dev_s *devp)
+{
+	struct vdin_dev_s *primary = vdin_devp[0];
+	struct tvin_state_machine_ops_s *ops;
+	struct tvin_sig_property_s *prop = &devp->prop;
+	struct tvin_sig_property_s *previous = &devp->pre_prop;
+	bool reload;
+
+	if (!devp->shared_hdmi_frontend)
+		return false;
+	if (!primary || !(READ_ONCE(primary->flags) & VDIN_FLAG_DEC_STARTED) ||
+	    !devp->frontend || !devp->frontend->sm_ops)
+		return true;
+	ops = devp->frontend->sm_ops;
+	if (!ops->get_sig_property)
+		return true;
+	ops->get_sig_property(devp->frontend, prop, devp->port_type);
+	prop->vdin_hdr_flag = prop->hdr_info.hdr_state != HDR_STATE_NULL &&
+		(prop->hdr_info.hdr_data.eotf == EOTF_HDR ||
+		 prop->hdr_info.hdr_data.eotf == EOTF_SMPTE_ST_2048 ||
+		 prop->hdr_info.hdr_data.eotf == EOTF_HLG);
+	reload = xchg(&devp->hdr_reload_pending, false);
+	if (!reload && prop->color_format == previous->color_format &&
+	    prop->color_fmt_range == previous->color_fmt_range &&
+	    prop->colordepth == previous->colordepth &&
+	    prop->vdin_hdr_flag == previous->vdin_hdr_flag &&
+	    prop->hdr_info.hdr_data.eotf == previous->hdr_info.hdr_data.eotf)
+		return false;
+
+	vdin_get_format_convert(devp);
+	vdin_set_matrix(devp);
+	vdin_set_bitdepth(devp);
+	vdin_source_bitdepth_reinit(devp);
+	vdin_set_wr_ctrl_vsync(devp, devp->addr_offset, devp->format_convert,
+			       devp->full_pack, devp->source_bitdepth,
+			       devp->flags & VDIN_FLAG_RDMA_ENABLE);
+	vdin_set_top(devp, devp->addr_offset, devp->parm.port,
+		     prop->color_format, devp->h_active, devp->bt_path);
+	*previous = *prop;
+	return true;
+}
+
 irqreturn_t vdin_v4l2_isr(int irq, void *dev_id)
 {
 	ulong flags;
@@ -3899,6 +3941,12 @@ irqreturn_t vdin_v4l2_isr(int irq, void *dev_id)
 	}
 
 	spin_lock_irqsave(&devp->isr_lock, flags);
+
+	if (vdin_update_shared_hdmi(devp)) {
+		devp->vdin_irq_flag = VDIN_IRQ_FLG_CSC_CHG;
+		vdin_drop_frame_info(devp, "shared hdmi signal change");
+		goto irq_handled;
+	}
 
 	if (devp->frame_drop_num) {
 		devp->frame_drop_num--;

@@ -3848,6 +3848,9 @@ unsigned int pre_vd1_mtx_sel[VD_PATH_MAX] = {
 	VPP_MATRIX_NULL,
 	VPP_MATRIX_NULL,
 };
+static struct vframe_master_display_colour_s hdmi_input_metadata[VD_PATH_MAX];
+static bool hdmi_input_metadata_valid[VD_PATH_MAX];
+module_param_array(hdmi_input_metadata_valid, bool, &vd_path_max, 0444);
 module_param_array(pre_vd1_mtx_sel, uint, &vd_path_max, 0664);
 MODULE_PARM_DESC(pre_vd1_mtx_sel, "\n pre_vd1_mtx_sel\n");
 unsigned int vd1_mtx_sel = VPP_MATRIX_NULL;
@@ -4356,6 +4359,16 @@ int signal_type_changed(struct vframe_s *vf,
 
 	p_new = &vf->prop.master_display_colour;
 	p_cur = &cur_master_display_colour[vd_path];
+	if (vf->source_type == VFRAME_SOURCE_TYPE_HDMI &&
+	    (p_new->present_flag & 1)) {
+		if (!hdmi_input_metadata_valid[vd_path] ||
+		    memcmp(&hdmi_input_metadata[vd_path], p_new, sizeof(*p_new)))
+			change_flag |= SIG_PRI_INFO;
+		hdmi_input_metadata[vd_path] = *p_new;
+		hdmi_input_metadata_valid[vd_path] = true;
+	} else {
+		hdmi_input_metadata_valid[vd_path] = false;
+	}
 	/* customer overwrite */
 	if (customer_master_display_en &&
 	    (p_new->present_flag & 0x80000000) == 0) {
@@ -5111,6 +5124,32 @@ static int calculate_contrast_adj(int max_lumin)
 	return target_contrast - vd1_contrast;
 }
 
+void amvecm_copy_hdmi_metadata(struct master_display_info_s *output,
+				     struct vframe_master_display_colour_s *processed)
+{
+	unsigned int path;
+	unsigned int transfer = (output->features >> 8) & 0xff;
+	struct vframe_master_display_colour_s *input;
+
+	if (customer_master_display_en || customer_hdmi_display_en ||
+	    (transfer != 16 && transfer != 18))
+		return;
+	for (path = 0; path < VD_PATH_MAX; path++) {
+		if (processed != &cur_master_display_colour[path] ||
+		    !hdmi_input_metadata_valid[path] ||
+		    hdr_process_mode[path] != PROC_BYPASS)
+			continue;
+		input = &hdmi_input_metadata[path];
+		memcpy(output->primaries, input->primaries, sizeof(output->primaries));
+		memcpy(output->white_point, input->white_point, sizeof(output->white_point));
+		memcpy(output->luminance, input->luminance, sizeof(output->luminance));
+		output->max_content = input->content_light_level.max_content;
+		output->max_frame_average = input->content_light_level.max_pic_average;
+		output->present_flag = 1;
+		return;
+	}
+}
+
 static void amvecm_cp_hdr_info(struct master_display_info_s *hdr_data,
 			       struct vframe_master_display_colour_s *p)
 {
@@ -5180,6 +5219,7 @@ static void amvecm_cp_hdr_info(struct master_display_info_s *hdr_data,
 	} else {
 		memset(hdr_data->primaries, 0, sizeof(hdr_data->primaries));
 	}
+	amvecm_copy_hdmi_metadata(hdr_data, p);
 	/* hdr send information debug */
 	memcpy(&dbg_hdr_send, hdr_data,
 	       sizeof(struct master_display_info_s));

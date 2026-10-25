@@ -175,6 +175,8 @@ int vdin_v4l2_if_isr(struct vdin_dev_s *devp, struct vframe_s *vfp)
 	list_del(&devp->cur_buff->list);
 	spin_unlock(&devp->list_head_lock);
 	devp->vdin_v4l2.stats.done_cnt++;
+	vb->sequence = devp->frame_cnt;
+	vb2buf->timestamp = ktime_get_ns();
 	vb2_buffer_done(vb2buf, VB2_BUF_STATE_DONE);
 
 	return 0;
@@ -252,7 +254,7 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
 				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height * 3 / 2;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
-				(v4l2_fmt->fmt.pix_mp.width * 12) >> 3;
+				v4l2_fmt->fmt.pix_mp.width;
 		}
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].sizeimage = 0;
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline = 0;
@@ -276,7 +278,7 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
 				v4l2_fmt->fmt.pix_mp.width;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width / 2;
+				v4l2_fmt->fmt.pix_mp.width;
 		}
 	} else {
 		dprintk(0, "vdin%d,err.not support num_planes=%d\n ",
@@ -660,7 +662,13 @@ static int vdin_vidioc_streamon(struct file *file, void *priv,
 		return -EFAULT;
 
 	ret = vb2_ioctl_streamon(file, priv, i);
-	vdin_v4l2_start_tvin(devp);
+	if (ret)
+		return ret;
+	ret = vdin_v4l2_start_tvin(devp);
+	if (ret) {
+		vb2_ioctl_streamoff(file, priv, i);
+		return ret;
+	}
 	memset(&devp->vdin_v4l2.stats, 0, sizeof(devp->vdin_v4l2.stats));
 	dprintk(2, "%s\n", __func__);
 	return 0;
@@ -805,6 +813,9 @@ static int vdin_vidioc_s_fmt_vid_cap_mplane(struct file *file,
 	devp->v4l2_fmt.fmt.pix_mp.ycbcr_enc    = fmt->fmt.pix_mp.ycbcr_enc;
 	devp->v4l2_fmt.fmt.pix_mp.field        = fmt->fmt.pix_mp.field;
 	devp->v4l2_fmt.fmt.pix_mp.pixelformat  = fmt->fmt.pix_mp.pixelformat;
+	if (fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ||
+	    fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV21)
+		fmt->fmt.pix_mp.num_planes = 1;
 	devp->v4l2_fmt.fmt.pix_mp.num_planes   = fmt->fmt.pix_mp.num_planes;
 
 	vdin_fill_pix_format(devp);
@@ -1267,10 +1278,11 @@ static int vdin_vidioc_s_input(struct file *file, void *priv, unsigned int i)
 	devp->afbce_flag = 0;
 
 #ifdef CONFIG_AMLOGIC_MEDIA_TVIN_HDMI
-	if (IS_HDMI_SRC(devp->v4l2_port_cur))
+	if (devp->index == 0 && IS_HDMI_SRC(devp->v4l2_port_cur))
 		rx_update_edid_callback(devp->v4l2_port_cur, RX_EDID_REMOVE_HDR);
 #endif
-	if (devp->parm.port != TVIN_PORT_MIPI && devp->index == 0 &&
+	if (devp->parm.port != TVIN_PORT_MIPI &&
+		(devp->index == 0 || IS_HDMI_SRC(devp->parm.port)) &&
 		!(devp->flags & VDIN_FLAG_DEC_OPENED)) {
 		ret = vdin_open_fe(devp->parm.port, 0, devp);
 		if (ret) {
@@ -1525,7 +1537,7 @@ static int vdin_v4l2_release(struct file *file)
 	}
 	devp->work_mode = VDIN_WORK_MD_NORMAL;
 #ifdef CONFIG_AMLOGIC_MEDIA_TVIN_HDMI
-	if (IS_HDMI_SRC(devp->v4l2_port_cur))
+	if (devp->index == 0 && IS_HDMI_SRC(devp->v4l2_port_cur))
 		rx_update_edid_callback(devp->v4l2_port_cur, RX_EDID_DEFAULT);
 #endif
 	return ret;
@@ -1862,7 +1874,7 @@ static int vdin_v4l2_queue_init(struct vdin_dev_s *devp,
 	/*que->mem_ops = &vb2_vmalloc_memops;*/
 	/*que->mem_ops = &vb2_dma_sg_memops;*/
 
-	que->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	que->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	/*
 	 * Assume that this DMA engine needs to have at least two buffers
 	 * available before it can be started. The start_streaming() op
@@ -2064,10 +2076,27 @@ int vdin_v4l2_start_tvin(struct vdin_dev_s *devp)
 	int ret;
 	struct vdin_parm_s vdin_cap_param;
 	const struct tvin_format_s *fmt_info_p;
+	struct vdin_dev_s *primary = vdin_get_dev(0);
+
+	devp->work_mode = VDIN_WORK_MD_V4L;
+	if (devp->v4l2_port_cur == TVIN_PORT_MAX)
+		devp->v4l2_port_cur = devp->v4l2_port[0];
+	if (IS_HDMI_SRC(devp->v4l2_port_cur) &&
+	    !(devp->flags & VDIN_FLAG_DEC_OPENED)) {
+		ret = vdin_open_fe(devp->v4l2_port_cur, 0, devp);
+		if (ret)
+			return ret;
+	}
 
 	/* TODO:get vd1/osd loopback source fmt */
-	if (devp->index)
+	if (devp->shared_hdmi_frontend) {
+		if (!primary || !(primary->flags & VDIN_FLAG_DEC_STARTED) ||
+		    primary->parm.port != devp->parm.port)
+			return -ENOLINK;
+		devp->parm.info = primary->parm.info;
+	} else if (devp->index) {
 		vdin_v4l2_loopback_fmt(devp);
+	}
 
 	/* Check args */
 	fmt_info_p = tvin_get_fmt_info(devp->parm.info.fmt);

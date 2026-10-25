@@ -364,6 +364,7 @@ EXPORT_SYMBOL(tvin_notify_vdin_skip_frame);
 int vdin_open_fe(enum tvin_port_e port, int index,  struct vdin_dev_s *devp)
 {
 	struct tvin_frontend_s *fe = tvin_get_frontend(port, index);
+	struct vdin_dev_s *primary = vdin_devp[0];
 	int ret = 0;
 
 	if (!fe) {
@@ -372,6 +373,19 @@ int vdin_open_fe(enum tvin_port_e port, int index,  struct vdin_dev_s *devp)
 		return -1;
 	}
 
+	if (devp->dtdata->hw_ver == VDIN_HW_T7 && devp->index == 1 &&
+	    IS_HDMI_SRC(port)) {
+		if (!primary || primary->parm.port != port ||
+		    !(primary->flags & VDIN_FLAG_DEC_STARTED))
+			return -ENOLINK;
+		devp->shared_hdmi_frontend = true;
+		devp->frontend = fe;
+		devp->parm.port = port;
+		devp->parm.info = primary->parm.info;
+		devp->prop = primary->prop;
+		devp->flags |= VDIN_FLAG_DEC_OPENED;
+		return 0;
+	}
 	devp->frontend = fe;
 	devp->parm.port = port;
 
@@ -418,12 +432,15 @@ void vdin_close_fe(struct vdin_dev_s *devp)
 		return;
 	}
 
-	if (IS_HDMI_SRC(devp->parm.port) || IS_TVAFE_SRC(devp->parm.port))
+	if (!devp->shared_hdmi_frontend &&
+	    (IS_HDMI_SRC(devp->parm.port) || IS_TVAFE_SRC(devp->parm.port)))
 		del_timer_sync(&devp->timer);
-	if (devp->frontend && devp->frontend->dec_ops->close) {
+	if (!devp->shared_hdmi_frontend && devp->frontend &&
+	    devp->frontend->dec_ops->close) {
 		devp->frontend->dec_ops->close(devp->frontend, devp->port_type);
-		devp->frontend = NULL;
 	}
+	devp->frontend = NULL;
+	devp->shared_hdmi_frontend = false;
 	devp->parm.port = TVIN_PORT_NULL;
 	devp->parm.info.fmt  = TVIN_SIG_FMT_NULL;
 	devp->parm.info.status = TVIN_SIG_STATUS_NULL;
@@ -1494,7 +1511,8 @@ int vdin_start_dec(struct vdin_dev_s *devp)
 		devp->vdin_delay_vfe2rd_list = 0;
 	}
 
-	if (!(devp->parm.flag & TVIN_PARM_FLAG_CAP) &&
+	if (!devp->shared_hdmi_frontend &&
+	    !(devp->parm.flag & TVIN_PARM_FLAG_CAP) &&
 	    devp->frontend &&
 	    devp->frontend->dec_ops &&
 	    devp->frontend->dec_ops->start &&
@@ -1703,7 +1721,8 @@ void vdin_stop_dec(struct vdin_dev_s *devp)
 		devp->self_stop_start) {
 		pr_info("linux system switch pc/game not need stop\n");
 	} else {
-		if (!(devp->parm.flag & TVIN_PARM_FLAG_CAP) &&
+		if (!devp->shared_hdmi_frontend &&
+		    !(devp->parm.flag & TVIN_PARM_FLAG_CAP) &&
 		    devp->frontend &&
 		    devp->frontend->dec_ops &&
 		    devp->frontend->dec_ops->stop &&
@@ -2033,7 +2052,8 @@ int start_tvin_service(int no, struct vdin_parm_s  *para)
 	}
 
 	if (fe) {
-		fe->private_data = para;
+		if (!devp->shared_hdmi_frontend)
+			fe->private_data = para;
 		fe->port         = devp->parm.port;
 		devp->frontend   = fe;
 
@@ -3991,7 +4011,8 @@ irqreturn_t vdin_v4l2_isr(int irq, void *dev_id)
 	vdin_backup_histgram(curr_wr_vf, devp);
 	vdin_hist_tgt(devp, curr_wr_vf);
 
-	if (devp->frontend && devp->frontend->dec_ops) {
+	if (!devp->shared_hdmi_frontend && devp->frontend &&
+	    devp->frontend->dec_ops) {
 		dec_ops = devp->frontend->dec_ops;
 		/*pass the histogram information to viu in frontend*/
 		devp->frontend->private_data = &curr_wr_vf->prop;

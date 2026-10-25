@@ -175,6 +175,8 @@ void set_force_output(enum output_format_e output);
 
 /* 0: hdr->hdr, 1:hdr->sdr, 2:hdr->hlg */
 extern uint hdr_process_mode[VD_PATH_MAX];
+void amvecm_copy_hdmi_metadata(struct master_display_info_s *output,
+			     struct vframe_master_display_colour_s *processed);
 extern uint cur_hdr_process_mode[VD_PATH_MAX];
 
 /* 0: bypass, 1:hdr10p->hdr, 2:hdr10p->sdr, 3:hdr10p->hlg */

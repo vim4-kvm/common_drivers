@@ -20,6 +20,68 @@ def function(name):
 
 
 class HdrOutputTest(unittest.TestCase):
+    def test_native_display_and_secondary_capture_use_independent_hdr_cores(self):
+        fixtures = r'''
+#include <assert.h>
+#include <stdbool.h>
+enum vd_format_e { SIGNAL_SDR, SIGNAL_HDR10, SIGNAL_HDR10PLUS, SIGNAL_HLG, SIGNAL_DOVI };
+enum { VDIN0_HDR, VDIN1_HDR, VPP_TOP0, HDR_SDR=2, HDR_BYPASS=4, HLG_BYPASS=8,
+       HLG_SDR=16, TVIN_PORT_VIU1_VIDEO=100, TVIN_PORT_VIU1_WB0_VD1,
+       TVIN_PORT_VIU1_WB0_VD2, TVIN_PORT_VIU1_WB0_POST_BLEND, TVIN_PORT_VIU1_WB1_POST_BLEND,
+       TVIN_PORT_VIU1_WB1_VD1, TVIN_PORT_VIU1_WB1_VD2, TVIN_PORT_VIU1_WB0_OSD1,
+       TVIN_PORT_VIU1_WB0_OSD2, TVIN_PORT_VIU1_WB1_OSD1, TVIN_PORT_VIU1_WB1_OSD2,
+       TVIN_PORT_VIU1_WB0_VPP, TVIN_PORT_VIU1_WB1_VPP, TVIN_PORT_VIU2_ENCL,
+       TVIN_PORT_VIU2_ENCI, TVIN_PORT_VIU2_ENCP };
+#define IS_HDMI_SRC(port) ((port)==1)
+#define WRITE_ONCE(field,value) ((field)=(value))
+#define pr_info(...) ((void)0)
+#define pr_err(...) ((void)0)
+struct vdin_dev_s {
+ unsigned index, vd1_fmt, tx_fmt, frame_drop_num;
+ bool shared_hdmi_frontend, hdr_sdr_output;
+ struct { bool vdin1_set_hdr_bypass; } debug;
+ struct { bool vdin0_set_hdr, vdin1_set_hdr; } *dtdata;
+ struct { unsigned port; } parm;
+};
+static bool vdin0_native_hdr;
+static enum vd_format_e input_format=SIGNAL_HDR10;
+static unsigned selected_core, selected_process;
+static enum vd_format_e vdin_hdmi_signal_format(struct vdin_dev_s *devp)
+{ (void)devp; return input_format; }
+static void hdr_set(unsigned core, unsigned process, unsigned top)
+{ selected_core=core; selected_process=process; (void)top; }
+'''
+        assertions = r'''
+int main(void) {
+ struct vdin_dev_s primary={ .parm.port=1 };
+ primary.dtdata=&(typeof(*primary.dtdata)){true,true};
+ struct vdin_dev_s secondary={ .index=1, .dtdata=primary.dtdata, .parm.port=1,
+                               .shared_hdmi_frontend=true, .tx_fmt=SIGNAL_SDR };
+ vdin_set_hdr(&primary);
+ assert(selected_core==VDIN0_HDR && selected_process==HDR_SDR && primary.hdr_sdr_output);
+ vdin0_native_hdr=true;
+ vdin_set_hdr(&primary);
+ assert(selected_core==VDIN0_HDR && selected_process==(HDR_BYPASS|HLG_BYPASS));
+ assert(!primary.hdr_sdr_output);
+ vdin_set_hdr(&secondary);
+ assert(selected_core==VDIN1_HDR && selected_process==HDR_SDR && secondary.hdr_sdr_output);
+ input_format=SIGNAL_HLG;
+ vdin_set_hdr(&secondary);
+ assert(selected_process==HLG_SDR && secondary.hdr_sdr_output);
+ input_format=SIGNAL_SDR;
+ vdin_set_hdr(&secondary);
+ assert(selected_process==(HDR_BYPASS|HLG_BYPASS) && !secondary.hdr_sdr_output);
+ return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / 'hdr-cores.c'
+            binary = Path(temporary) / 'hdr-cores'
+            source.write_text(fixtures + function('vdin_set_hdr') + assertions)
+            subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Werror',
+                            str(source), '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_hdr_nv21_memory_layout_and_tonemapped_metadata(self):
         fixtures = r'''
 #include <assert.h>

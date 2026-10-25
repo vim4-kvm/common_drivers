@@ -2641,6 +2641,7 @@ void hdmi_packet_process(int signal_change_flag,
 
 	/* drm */
 	prepare_hdr_info(&send_info, p, vd_path, source_type);
+	amvecm_copy_hdmi_metadata(&send_info, p);
 	memcpy(&dbg_hdr_send, &send_info,
 	       sizeof(struct master_display_info_s));
 

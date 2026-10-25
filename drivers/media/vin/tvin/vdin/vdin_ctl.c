@@ -1185,7 +1185,8 @@ void vdin_set_top(struct vdin_dev_s *devp, unsigned int offset,
 			VDI4_ASFIFO_CTRL_BIT, VDI4_ASFIFO_CTRL_WID);
 
 		/*reset top afifo for green screen when enter the channel*/
-		if (cpu_after_eq(MESON_CPU_MAJOR_ID_TL1)) {
+		if (cpu_after_eq(MESON_CPU_MAJOR_ID_TL1) &&
+		    !devp->shared_hdmi_frontend) {
 			wr_bits(offset, VPU_SW_RESET, 1, 26, 1);
 			wr_bits(offset, VPU_SW_RESET, 0, 26, 1);
 		}
@@ -1886,6 +1887,9 @@ static enum vd_format_e vdin_hdmi_signal_format(struct vdin_dev_s *devp)
 	return SIGNAL_HDR10;
 }
 
+static bool vdin0_native_hdr;
+module_param(vdin0_native_hdr, bool, 0444);
+
 void vdin_set_hdr(struct vdin_dev_s *devp)
 {
 	enum vd_format_e video_format;
@@ -1902,12 +1906,21 @@ void vdin_set_hdr(struct vdin_dev_s *devp)
 		if (!devp->dtdata->vdin0_set_hdr || !IS_HDMI_SRC(devp->parm.port))
 			return;
 		hdr_module = VDIN0_HDR;
+		if (vdin0_native_hdr) {
+			hdr_set(hdr_module, HDR_BYPASS | HLG_BYPASS, VPP_TOP0);
+			WRITE_ONCE(devp->hdr_sdr_output, false);
+			return;
+		}
 		video_format = vdin_hdmi_signal_format(devp);
 		goto set_hdr;
 	}
 
 	if (!devp->dtdata->vdin1_set_hdr)
 		return;
+	if (devp->shared_hdmi_frontend) {
+		video_format = vdin_hdmi_signal_format(devp);
+		goto set_hdr;
+	}
 
 	switch (devp->parm.port) {
 	case TVIN_PORT_VIU1_VIDEO:
@@ -1977,7 +1990,6 @@ set_hdr:
 		break;
 	}
 	WRITE_ONCE(devp->hdr_sdr_output,
-		   hdr_module == VDIN0_HDR &&
 		   (video_format == SIGNAL_HDR10 ||
 		    video_format == SIGNAL_HDR10PLUS ||
 		    video_format == SIGNAL_HLG));

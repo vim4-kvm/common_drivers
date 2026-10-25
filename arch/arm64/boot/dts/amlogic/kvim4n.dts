@@ -1878,6 +1878,7 @@
 	memory-region = <&vdin1_cma_reserved>;
 	status = "okay";
 	vdin_function_sel = <0x400>;
+	fe_ports = <0x4001 0xa002 0xa006>;
 };
 
 &periphs_pinctrl {

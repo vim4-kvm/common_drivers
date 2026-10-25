@@ -660,7 +660,13 @@ static int vdin_vidioc_streamon(struct file *file, void *priv,
 		return -EFAULT;
 
 	ret = vb2_ioctl_streamon(file, priv, i);
-	vdin_v4l2_start_tvin(devp);
+	if (ret)
+		return ret;
+	ret = vdin_v4l2_start_tvin(devp);
+	if (ret) {
+		vb2_ioctl_streamoff(file, priv, i);
+		return ret;
+	}
 	memset(&devp->vdin_v4l2.stats, 0, sizeof(devp->vdin_v4l2.stats));
 	dprintk(2, "%s\n", __func__);
 	return 0;
@@ -805,6 +811,9 @@ static int vdin_vidioc_s_fmt_vid_cap_mplane(struct file *file,
 	devp->v4l2_fmt.fmt.pix_mp.ycbcr_enc    = fmt->fmt.pix_mp.ycbcr_enc;
 	devp->v4l2_fmt.fmt.pix_mp.field        = fmt->fmt.pix_mp.field;
 	devp->v4l2_fmt.fmt.pix_mp.pixelformat  = fmt->fmt.pix_mp.pixelformat;
+	if (fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ||
+	    fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV21)
+		fmt->fmt.pix_mp.num_planes = 1;
 	devp->v4l2_fmt.fmt.pix_mp.num_planes   = fmt->fmt.pix_mp.num_planes;
 
 	vdin_fill_pix_format(devp);
@@ -1267,10 +1276,11 @@ static int vdin_vidioc_s_input(struct file *file, void *priv, unsigned int i)
 	devp->afbce_flag = 0;
 
 #ifdef CONFIG_AMLOGIC_MEDIA_TVIN_HDMI
-	if (IS_HDMI_SRC(devp->v4l2_port_cur))
+	if (devp->index == 0 && IS_HDMI_SRC(devp->v4l2_port_cur))
 		rx_update_edid_callback(devp->v4l2_port_cur, RX_EDID_REMOVE_HDR);
 #endif
-	if (devp->parm.port != TVIN_PORT_MIPI && devp->index == 0 &&
+	if (devp->parm.port != TVIN_PORT_MIPI &&
+		(devp->index == 0 || IS_HDMI_SRC(devp->parm.port)) &&
 		!(devp->flags & VDIN_FLAG_DEC_OPENED)) {
 		ret = vdin_open_fe(devp->parm.port, 0, devp);
 		if (ret) {
@@ -2064,10 +2074,17 @@ int vdin_v4l2_start_tvin(struct vdin_dev_s *devp)
 	int ret;
 	struct vdin_parm_s vdin_cap_param;
 	const struct tvin_format_s *fmt_info_p;
+	struct vdin_dev_s *primary = vdin_get_dev(0);
 
 	/* TODO:get vd1/osd loopback source fmt */
-	if (devp->index)
+	if (devp->shared_hdmi_frontend) {
+		if (!primary || !(primary->flags & VDIN_FLAG_DEC_STARTED) ||
+		    primary->parm.port != devp->parm.port)
+			return -ENOLINK;
+		devp->parm.info = primary->parm.info;
+	} else if (devp->index) {
 		vdin_v4l2_loopback_fmt(devp);
+	}
 
 	/* Check args */
 	fmt_info_p = tvin_get_fmt_info(devp->parm.info.fmt);

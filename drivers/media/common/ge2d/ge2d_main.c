@@ -1913,6 +1913,25 @@ static void timer_expire(struct timer_list *t)
 }
 #endif
 
+static int ge2d_set_min_rate(struct device *dev, struct clk *clk,
+			     unsigned long rate)
+{
+	long rounded_rate;
+	int ret;
+
+	/* SoC rates are nominal; use a floor the clock tree can achieve. */
+	rounded_rate = clk_round_rate(clk, rate);
+	if (rounded_rate < 0)
+		return rounded_rate;
+
+	/* Keep the requirement until devm_clk_get() releases this consumer. */
+	ret = clk_set_min_rate(clk, rounded_rate);
+	if (ret)
+		dev_err(dev, "Failed to request GE2D clock rate: %d\n", ret);
+
+	return ret;
+}
+
 static int ge2d_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -1971,7 +1990,10 @@ static int ge2d_probe(struct platform_device *pdev)
 		}
 		ge2d_log_dbg("clock source clk_ge2d_gate %p\n", clk_gate);
 		if (clk_cnt == 2) {
-			clk_set_rate(clk_gate, ge2d_meson_dev.ge2d_rate);
+			ret = ge2d_set_min_rate(&pdev->dev, clk_gate,
+					      ge2d_meson_dev.ge2d_rate);
+			if (ret)
+				goto failed1;
 			ge2d_log_info("ge2d gate clock is %lu MHZ\n",
 				       clk_get_rate(clk_gate) / 1000000);
 		}
@@ -2014,7 +2036,10 @@ static int ge2d_probe(struct platform_device *pdev)
 					else if (vpu_rate > 0 && vapb_rate > vpu_rate)
 						vapb_rate = vpu_rate;
 				}
-				clk_set_rate(clk_vapb0, vapb_rate);
+				ret = ge2d_set_min_rate(&pdev->dev, clk_vapb0,
+						      vapb_rate);
+				if (ret)
+					goto failed1;
 				clk_prepare_enable(clk_vapb0);
 				vapb_rate = clk_get_rate(clk_vapb0);
 				ge2d_log_info("ge2d clock is %d MHZ\n",
@@ -2026,7 +2051,9 @@ static int ge2d_probe(struct platform_device *pdev)
 			if (!IS_ERR_OR_NULL(clk_gate)) {
 				int clk_rate = ge2d_meson_dev.ge2d_rate;
 
-				clk_set_rate(clk_gate, clk_rate);
+				ret = ge2d_set_min_rate(&pdev->dev, clk_gate, clk_rate);
+				if (ret)
+					goto failed1;
 				clk_prepare_enable(clk_gate);
 				clk_rate = clk_get_rate(clk_gate);
 				ge2d_log_info("ge2d clock is %d MHZ\n",

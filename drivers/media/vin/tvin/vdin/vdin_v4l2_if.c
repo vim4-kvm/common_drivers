@@ -278,7 +278,7 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
 				v4l2_fmt->fmt.pix_mp.width;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width / 2;
+				v4l2_fmt->fmt.pix_mp.width;
 		}
 	} else {
 		dprintk(0, "vdin%d,err.not support num_planes=%d\n ",
@@ -2077,6 +2077,16 @@ int vdin_v4l2_start_tvin(struct vdin_dev_s *devp)
 	struct vdin_parm_s vdin_cap_param;
 	const struct tvin_format_s *fmt_info_p;
 	struct vdin_dev_s *primary = vdin_get_dev(0);
+
+	devp->work_mode = VDIN_WORK_MD_V4L;
+	if (devp->v4l2_port_cur == TVIN_PORT_MAX)
+		devp->v4l2_port_cur = devp->v4l2_port[0];
+	if (IS_HDMI_SRC(devp->v4l2_port_cur) &&
+	    !(devp->flags & VDIN_FLAG_DEC_OPENED)) {
+		ret = vdin_open_fe(devp->v4l2_port_cur, 0, devp);
+		if (ret)
+			return ret;
+	}
 
 	/* TODO:get vd1/osd loopback source fmt */
 	if (devp->shared_hdmi_frontend) {

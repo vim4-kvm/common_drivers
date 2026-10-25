@@ -445,7 +445,9 @@ module_param_array(vdin_oo_y_lut_hdr_sdr, int, &num_vdin_hdr_sdr_lut, 0664);
 
 static const int *hdr_sdr_gain(enum hdr_module_sel module_sel)
 {
-	if ((module_sel == VDIN0_HDR || module_sel == VDIN1_HDR) &&
+	if ((module_sel == VDIN0_HDR || module_sel == VDIN1_HDR ||
+	     (module_sel == VD1_HDR && is_meson_t7_cpu() &&
+	      get_hdr_policy() == 2 && get_force_output() == BT709)) &&
 	    READ_ONCE(num_vdin_hdr_sdr_lut) == HDR2_OOTF_LUT_SIZE)
 		return vdin_oo_y_lut_hdr_sdr;
 	return oo_y_lut_hdr_sdr;

@@ -777,6 +777,7 @@ static void hdr_work_func(struct work_struct *work)
 		}
 		if (hdev->hdr_transfer_feature == T_BT709 &&
 		    hdev->hdr_color_feature == C_BT709) {
+			hdmi_drm_infoframe_set(NULL);
 			/* update hdr mode flag */
 			hdev->tx_comm.hdmi_current_hdr_mode = 0;
 			hdev->tx_comm.hdmi_last_hdr_mode = hdev->tx_comm.hdmi_current_hdr_mode;

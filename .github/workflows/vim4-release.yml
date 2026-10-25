@@ -23,6 +23,7 @@ jobs:
       - run: python3 drivers/media/vin/tvin/vdin/test_hdr_output.py
       - run: python3 drivers/media/vin/tvin/vdin/test_secondary_hdmi.py
       - run: python3 drivers/media/enhancement/amvecm/test_hdmi_metadata.py
+      - run: python3 drivers/media/enhancement/amvecm/test_capture_tone_curve.py
       - run: python3 drivers/media/vout/hdmitx21/test_avi_hdr.py
   kernel:
     needs: driver-regression

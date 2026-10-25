@@ -175,6 +175,8 @@ int vdin_v4l2_if_isr(struct vdin_dev_s *devp, struct vframe_s *vfp)
 	list_del(&devp->cur_buff->list);
 	spin_unlock(&devp->list_head_lock);
 	devp->vdin_v4l2.stats.done_cnt++;
+	vb->sequence = devp->frame_cnt;
+	vb2buf->timestamp = ktime_get_ns();
 	vb2_buffer_done(vb2buf, VB2_BUF_STATE_DONE);
 
 	return 0;
@@ -252,7 +254,7 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
 				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height * 3 / 2;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
-				(v4l2_fmt->fmt.pix_mp.width * 12) >> 3;
+				v4l2_fmt->fmt.pix_mp.width;
 		}
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].sizeimage = 0;
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline = 0;
@@ -1872,7 +1874,7 @@ static int vdin_v4l2_queue_init(struct vdin_dev_s *devp,
 	/*que->mem_ops = &vb2_vmalloc_memops;*/
 	/*que->mem_ops = &vb2_dma_sg_memops;*/
 
-	que->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_COPY;
+	que->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	/*
 	 * Assume that this DMA engine needs to have at least two buffers
 	 * available before it can be started. The start_streaming() op

@@ -373,19 +373,21 @@ int vdin_open_fe(enum tvin_port_e port, int index,  struct vdin_dev_s *devp)
 		return -1;
 	}
 
-	devp->frontend = fe;
-	devp->parm.port = port;
 	if (devp->dtdata->hw_ver == VDIN_HW_T7 && devp->index == 1 &&
 	    IS_HDMI_SRC(port)) {
 		if (!primary || primary->parm.port != port ||
 		    !(primary->flags & VDIN_FLAG_DEC_STARTED))
 			return -ENOLINK;
 		devp->shared_hdmi_frontend = true;
+		devp->frontend = fe;
+		devp->parm.port = port;
 		devp->parm.info = primary->parm.info;
 		devp->prop = primary->prop;
 		devp->flags |= VDIN_FLAG_DEC_OPENED;
 		return 0;
 	}
+	devp->frontend = fe;
+	devp->parm.port = port;
 
 	devp->parm.info.status = TVIN_SIG_STATUS_NULL;
 	/* clear color para*/

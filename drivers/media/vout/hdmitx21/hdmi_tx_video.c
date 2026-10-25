@@ -25,6 +25,21 @@ static void hdmitx_set_spd_info(struct hdmitx_dev *hdmitx_device);
 static void hdmi_set_vend_spec_infofram(struct hdmitx_dev *hdev,
 					enum hdmi_vic videocode);
 
+static bool hdmitx_use_bt2020(const struct hdmitx_dev *hdev)
+{
+	u32 support = hdev->tx_comm.rxcap.hdr_info2.hdr_support;
+
+	if (hdev->colormetry)
+		return true;
+	if (hdev->hdr_color_feature != C_BT2020)
+		return false;
+	return (hdev->hdr_transfer_feature == T_SMPTE_ST_2084 &&
+		(support & 0x4)) ||
+		((hdev->hdr_transfer_feature == T_HLG ||
+		  hdev->hdr_transfer_feature == T_BT2020_10) &&
+		 (support & 0x8));
+}
+
 static void construct_avi_packet(struct hdmitx_dev *hdev)
 {
 	struct hdmi_avi_infoframe *info = &hdev->infoframes.avi.avi;
@@ -43,6 +58,10 @@ static void construct_avi_packet(struct hdmitx_dev *hdev)
 	info->active_aspect = HDMI_ACTIVE_ASPECT_PICTURE;
 	info->itc = 0;
 	info->extended_colorimetry = HDMI_EXTENDED_COLORIMETRY_XV_YCC_601;
+	if (hdmitx_use_bt2020(hdev)) {
+		info->colorimetry = HDMI_COLORIMETRY_EXTENDED;
+		info->extended_colorimetry = HDMI_EXTENDED_COLORIMETRY_BT2020;
+	}
 	info->quantization_range = HDMI_QUANTIZATION_RANGE_LIMITED;
 	info->nups = HDMI_NUPS_UNKNOWN;
 	info->video_code = para->timing.vic;

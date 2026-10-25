@@ -64,11 +64,18 @@ int main(void) {
         end = text.index('\n}', start) + 2
         fixture = r'''
 #include <assert.h>
+#include <stdbool.h>
 #define HDR2_OOTF_LUT_SIZE 149
 #define READ_ONCE(value) (value)
 enum hdr_module_sel { VD1_HDR, VDIN0_HDR, VDIN1_HDR, DI_HDR };
 static int oo_y_lut_hdr_sdr[149], vdin_oo_y_lut_hdr_sdr[149];
 static int num_vdin_hdr_sdr_lut;
+enum { BT709=1 };
+static int policy, forced=BT709;
+static bool t7=true;
+static int get_hdr_policy(void) { return policy; }
+static int get_force_output(void) { return forced; }
+static bool is_meson_t7_cpu(void) { return t7; }
 '''
         assertions = r'''
 int main(void) {
@@ -82,6 +89,13 @@ int main(void) {
  assert(hdr_sdr_gain(VDIN1_HDR)[0]==3153);
  oo_y_lut_hdr_sdr[0]=800;
  assert(hdr_sdr_gain(VDIN1_HDR)[0]==3153);
+ assert(hdr_sdr_gain(VD1_HDR)[0]==800);
+ policy=2;
+ assert(hdr_sdr_gain(VD1_HDR)[0]==3153);
+ forced=3;
+ assert(hdr_sdr_gain(VD1_HDR)[0]==800);
+ forced=BT709;
+ t7=false;
  assert(hdr_sdr_gain(VD1_HDR)[0]==800);
  assert(hdr_sdr_gain(DI_HDR)[0]==800);
  return 0;

@@ -277,15 +277,24 @@ err:
 	return ret;
 }
 
-static void vpu_clk_enable(struct vpu_clks *clks)
+static int vpu_clk_enable(struct vpu_clks *clks)
 {
 	u32 freq = 400;
+	long rate;
+	int ret;
 
 	if (set_clock_freq && set_clock_freq <= 400)
 		freq = set_clock_freq;
 
+	/* The APB clock can be shared with GE2D, which needs a higher rate. */
+	rate = clk_round_rate(clks->dos_apb_clk, freq * MHz);
+	if (rate < 0)
+		return rate;
+	ret = clk_set_min_rate(clks->dos_apb_clk, rate);
+	if (ret)
+		return ret;
+
 	clk_set_rate(clks->dos_clk, freq * MHz);
-	clk_set_rate(clks->dos_apb_clk, freq * MHz);
 
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
 		if (clock_a > 0) {
@@ -344,6 +353,7 @@ static void vpu_clk_enable(struct vpu_clks *clks)
 	clk_disable(clks->b_clk);
 	clk_disable(clks->a_clk);
 #endif
+	return 0;
 }
 
 static void vpu_clk_disable(struct vpu_clks *clks)
@@ -362,6 +372,7 @@ static void vpu_clk_disable(struct vpu_clks *clks)
 	clk_unprepare(clks->b_clk);
 	clk_unprepare(clks->a_clk);
 	clk_disable_unprepare(clks->dos_apb_clk);
+	clk_set_min_rate(clks->dos_apb_clk, 0);
 	clk_disable_unprepare(clks->dos_clk);
 	/* the power off */
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
@@ -1061,7 +1072,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 		enc_pr(LOG_ERROR, "MultiEnc memory is not malloced yet wait & retry!\n");
 		r = -EBUSY;
 	}
-	if (first_open) {
+	if (first_open && !r) {
 		if ((s_vpu_irq >= 0) && (s_vpu_irq_requested == false)) {
 			s32 err;
 
@@ -1079,7 +1090,9 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 		}
 
 		/* enable vpu clks and power*/
-		vpu_clk_enable(&s_vpu_clks);
+		r = vpu_clk_enable(&s_vpu_clks);
+		if (r)
+			enc_pr(LOG_ERROR, "Failed to request encoder bus clock: %d\n", r);
 	}
 
 	if (r != 0) {

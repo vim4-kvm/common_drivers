@@ -4865,6 +4865,15 @@ static ssize_t input_rate_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(input_rate);
 
+static ssize_t hdr_sdr_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct vdin_dev_s *devp = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", READ_ONCE(devp->hdr_sdr_output));
+}
+static DEVICE_ATTR_RO(hdr_sdr);
+
 static void vdin_dump_sct_state(struct vdin_dev_s *devp)
 {
 	int i, sum = 0;
@@ -4985,6 +4994,7 @@ int vdin_create_debug_files(struct device *dev)
 	ret = device_create_file(dev, &dev_attr_crop);
 	ret = device_create_file(dev, &dev_attr_snow_flag);
 	ret = device_create_file(dev, &dev_attr_input_rate);
+	ret = device_create_file(dev, &dev_attr_hdr_sdr);
 #endif
 	return ret;
 }
@@ -5005,6 +5015,7 @@ void vdin_remove_debug_files(struct device *dev)
 	device_remove_file(dev, &dev_attr_crop);
 	device_remove_file(dev, &dev_attr_snow_flag);
 	device_remove_file(dev, &dev_attr_input_rate);
+	device_remove_file(dev, &dev_attr_hdr_sdr);
 #endif
 	device_remove_file(dev, &dev_attr_attr);
 	device_remove_file(dev, &dev_attr_sig_det);

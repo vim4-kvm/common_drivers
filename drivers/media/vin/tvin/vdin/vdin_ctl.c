@@ -1896,9 +1896,7 @@ void vdin_set_hdr(struct vdin_dev_s *devp)
 
 	/*
 	 * T7 VDIN0 has its own HDR2 core. Tone-map HDMI input to SDR there so
-	 * 8-bit capture of an HDR source is not washed out. The vframe
-	 * signal_type still describes the source, so a display path that
-	 * needs HDR passthrough must set vdin1_bypass_hdr on vdin0.
+	 * 8-bit capture of an HDR source is not washed out.
 	 */
 	if (devp->index == 0) {
 		if (!devp->dtdata->vdin0_set_hdr || !IS_HDMI_SRC(devp->parm.port))
@@ -1978,6 +1976,11 @@ set_hdr:
 	default:
 		break;
 	}
+	WRITE_ONCE(devp->hdr_sdr_output,
+		   hdr_module == VDIN0_HDR &&
+		   (video_format == SIGNAL_HDR10 ||
+		    video_format == SIGNAL_HDR10PLUS ||
+		    video_format == SIGNAL_HLG));
 #endif
 	/* hdr set uses rdma, will delay 1 frame to take effect */
 	devp->frame_drop_num = 1;
@@ -5023,7 +5026,8 @@ void vdin_set_bitdepth(struct vdin_dev_s *devp)
 		break;
 	}
 
-	if (devp->work_mode == VDIN_WORK_MD_V4L)
+	if (devp->work_mode == VDIN_WORK_MD_V4L ||
+	    vdin_is_convert_to_nv21(devp->format_convert))
 		bit_dep = VDIN_COLOR_DEEPS_8BIT;
 	devp->source_bitdepth = bit_dep;
 #ifdef VDIN_BRINGUP_BYPASS_COLOR_CNVT
@@ -6404,6 +6408,19 @@ void vdin_fmm_check(struct vdin_dev_s *devp,
 	}
 }
 
+static void vdin_set_sdr_metadata(struct vframe_s *vf)
+{
+	vf->signal_type &= ~((1U << 29) | (1U << 25) | 0xffffff);
+	vf->signal_type |= 0x010101;
+	vf->ext_signal_type &= ~0xff00;
+	vf->ext_signal_type |= 2 << 8;
+	memset(&vf->prop.master_display_colour, 0,
+	       sizeof(vf->prop.master_display_colour));
+	memset(&vf->prop.hdr10p_data, 0, sizeof(vf->prop.hdr10p_data));
+	vf->drm_if.size = 0;
+	vf->emp.size = 0;
+}
+
 void vdin_set_drm_data(struct vdin_dev_s *devp,
 		       struct vframe_s *vf)
 {
@@ -6523,6 +6540,8 @@ void vdin_set_drm_data(struct vdin_dev_s *devp,
 	vf->emp.addr = &devp->hdr.empbuf;
 	vf->emp.size = devp->hdr.emp_size;
 	vdin_pr_emp_data(devp, vf);
+	if (READ_ONCE(devp->hdr_sdr_output))
+		vdin_set_sdr_metadata(vf);
 }
 
 bool vdin_check_is_spd_data(struct vdin_dev_s *devp)

@@ -964,6 +964,7 @@ struct vdin_dev_s {
 	bool csc_cfg;
 	/* Consumed by the capture ISR, alongside signal-driven HDR updates. */
 	bool hdr_reload_pending;
+	bool hdr_sdr_output;
 	/* duration of current timing */
 	unsigned int duration;
 	/* color-depth for vdin write */

@@ -30,6 +30,7 @@ static struct hdmitx_dev device;
 static int hdr_status_pos, disabled, replace_with_hdr;
 static void hdmi_drm_infoframe_init(struct hdmi_drm_infoframe *info) { (void)info; }
 static void hdmi_drm_infoframe_set(struct hdmi_drm_infoframe *info) { if (!info) disabled++; }
+static void hdmi_vend_infoframe_rawset(void *header, void *body) { (void)header; (void)body; }
 static void hdmi_avi_infoframe_config(int command, int value) { (void)command; (void)value; }
 static void msleep(int duration) { (void)duration; if (replace_with_hdr) device.hdr_transfer_feature=16; }
 static void hdmitx_sdr_hdr_uevent(struct hdmitx_dev *dev) { (void)dev; }

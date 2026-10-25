@@ -1537,7 +1537,7 @@ static int vdin_v4l2_release(struct file *file)
 	}
 	devp->work_mode = VDIN_WORK_MD_NORMAL;
 #ifdef CONFIG_AMLOGIC_MEDIA_TVIN_HDMI
-	if (IS_HDMI_SRC(devp->v4l2_port_cur))
+	if (devp->index == 0 && IS_HDMI_SRC(devp->v4l2_port_cur))
 		rx_update_edid_callback(devp->v4l2_port_cur, RX_EDID_DEFAULT);
 #endif
 	return ret;

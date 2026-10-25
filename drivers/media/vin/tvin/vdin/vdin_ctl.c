@@ -1185,7 +1185,8 @@ void vdin_set_top(struct vdin_dev_s *devp, unsigned int offset,
 			VDI4_ASFIFO_CTRL_BIT, VDI4_ASFIFO_CTRL_WID);
 
 		/*reset top afifo for green screen when enter the channel*/
-		if (cpu_after_eq(MESON_CPU_MAJOR_ID_TL1)) {
+		if (cpu_after_eq(MESON_CPU_MAJOR_ID_TL1) &&
+		    !devp->shared_hdmi_frontend) {
 			wr_bits(offset, VPU_SW_RESET, 1, 26, 1);
 			wr_bits(offset, VPU_SW_RESET, 0, 26, 1);
 		}

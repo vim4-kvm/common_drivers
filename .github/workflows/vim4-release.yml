@@ -14,13 +14,14 @@ on:
 permissions:
   contents: read
 jobs:
-  usb-regression:
+  driver-regression:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: python3 drivers/usb/crg/test_setup_events.py
+      - run: python3 drivers/media_modules/frame_sink/encoder/multi/test_shared_clock.py
   kernel:
-    needs: usb-regression
+    needs: driver-regression
     uses: vim4-kvm/vim4-kvm/.github/workflows/kernel.yml@main
     permissions:
       contents: write

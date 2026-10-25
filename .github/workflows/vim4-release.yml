@@ -21,6 +21,8 @@ jobs:
       - run: python3 drivers/usb/crg/test_setup_events.py
       - run: python3 drivers/media_modules/frame_sink/encoder/multi/test_shared_clock.py
       - run: python3 drivers/media/vin/tvin/vdin/test_hdr_output.py
+      - run: python3 drivers/media/vin/tvin/vdin/test_secondary_hdmi.py
+      - run: python3 drivers/media/enhancement/amvecm/test_hdmi_metadata.py
   kernel:
     needs: driver-regression
     uses: vim4-kvm/vim4-kvm/.github/workflows/kernel.yml@main

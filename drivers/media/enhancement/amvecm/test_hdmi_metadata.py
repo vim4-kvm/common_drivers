@@ -8,7 +8,7 @@ import unittest
 class HdmiMetadataTest(unittest.TestCase):
     def test_native_hdmi_preserves_zero_and_partial_static_metadata(self):
         text = Path(__file__).with_name('amcsc.c').read_text()
-        start = text.index('static void amvecm_copy_hdmi_metadata(')
+        start = text.index('void amvecm_copy_hdmi_metadata(')
         brace = text.index('{', start)
         end, depth = brace + 1, 1
         while depth:

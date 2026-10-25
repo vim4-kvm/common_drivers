@@ -3850,6 +3850,7 @@ unsigned int pre_vd1_mtx_sel[VD_PATH_MAX] = {
 };
 static struct vframe_master_display_colour_s hdmi_input_metadata[VD_PATH_MAX];
 static bool hdmi_input_metadata_valid[VD_PATH_MAX];
+module_param_array(hdmi_input_metadata_valid, bool, &vd_path_max, 0444);
 module_param_array(pre_vd1_mtx_sel, uint, &vd_path_max, 0664);
 MODULE_PARM_DESC(pre_vd1_mtx_sel, "\n pre_vd1_mtx_sel\n");
 unsigned int vd1_mtx_sel = VPP_MATRIX_NULL;
@@ -5123,7 +5124,7 @@ static int calculate_contrast_adj(int max_lumin)
 	return target_contrast - vd1_contrast;
 }
 
-static void amvecm_copy_hdmi_metadata(struct master_display_info_s *output,
+void amvecm_copy_hdmi_metadata(struct master_display_info_s *output,
 				     struct vframe_master_display_colour_s *processed)
 {
 	unsigned int path;

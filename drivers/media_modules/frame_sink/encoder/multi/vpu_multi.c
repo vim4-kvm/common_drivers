@@ -277,6 +277,21 @@ err:
 	return ret;
 }
 
+static int vpu_clk_request_apb(struct vpu_clks *clks)
+{
+	u32 freq = 400;
+	long rate;
+
+	if (set_clock_freq && set_clock_freq <= 400)
+		freq = set_clock_freq;
+
+	/* The APB clock can be shared with GE2D, which needs a higher rate. */
+	rate = clk_round_rate(clks->dos_apb_clk, freq * MHz);
+	if (rate < 0)
+		return rate;
+	return clk_set_min_rate(clks->dos_apb_clk, rate);
+}
+
 static void vpu_clk_enable(struct vpu_clks *clks)
 {
 	u32 freq = 400;
@@ -285,7 +300,6 @@ static void vpu_clk_enable(struct vpu_clks *clks)
 		freq = set_clock_freq;
 
 	clk_set_rate(clks->dos_clk, freq * MHz);
-	clk_set_rate(clks->dos_apb_clk, freq * MHz);
 
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
 		if (clock_a > 0) {
@@ -362,6 +376,7 @@ static void vpu_clk_disable(struct vpu_clks *clks)
 	clk_unprepare(clks->b_clk);
 	clk_unprepare(clks->a_clk);
 	clk_disable_unprepare(clks->dos_apb_clk);
+	clk_set_min_rate(clks->dos_apb_clk, 0);
 	clk_disable_unprepare(clks->dos_clk);
 	/* the power off */
 	if (get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T7) {
@@ -1026,6 +1041,13 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 	}*/
 	filp->private_data = (void *)(&s_vpu_drv_context);
 	spin_unlock(&s_vpu_lock);
+	if (first_open) {
+		r = vpu_clk_request_apb(&s_vpu_clks);
+		if (r) {
+			enc_pr(LOG_ERROR, "Failed to request encoder bus clock: %d\n", r);
+			goto err_open;
+		}
+	}
 	if (first_open && !use_reserve) {
 #ifdef CONFIG_CMA
 		s_video_memory.size = cma_cfg_size;
@@ -1061,7 +1083,7 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 		enc_pr(LOG_ERROR, "MultiEnc memory is not malloced yet wait & retry!\n");
 		r = -EBUSY;
 	}
-	if (first_open) {
+	if (first_open && !r) {
 		if ((s_vpu_irq >= 0) && (s_vpu_irq_requested == false)) {
 			s32 err;
 
@@ -1069,10 +1091,8 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 
 			if (err) {
 				enc_pr(LOG_ERROR, "Failed to register irq handler\n");
-				spin_lock(&s_vpu_lock);
-				s_vpu_drv_context.open_count--;
-				spin_unlock(&s_vpu_lock);
-				return -EFAULT;
+				r = -EFAULT;
+				goto err_open;
 			}
 
 			s_vpu_irq_requested = true;
@@ -1082,7 +1102,10 @@ static s32 vpu_open(struct inode *inode, struct file *filp)
 		vpu_clk_enable(&s_vpu_clks);
 	}
 
+err_open:
 	if (r != 0) {
+		if (first_open)
+			clk_set_min_rate(s_vpu_clks.dos_apb_clk, 0);
 		spin_lock(&s_vpu_lock);
 		s_vpu_drv_context.open_count--;
 		spin_unlock(&s_vpu_lock);

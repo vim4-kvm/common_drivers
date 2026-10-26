@@ -1227,13 +1227,6 @@ void hdmitx_unregister_vrr(struct hdmitx_dev *hdev)
 	HDMITX_INFO("%s ret = %d\n", __func__, ret);
 }
 
-static struct vinfo_s *hdmitx_get_curvinfo(void *data)
-{
-	struct hdmitx_dev *hdev = get_hdmitx21_device();
-
-	return &hdev->tx_comm.hdmitx_vinfo;
-}
-
 void hdmitx_register_vrr(struct hdmitx_dev *hdev)
 {
 	int ret;
@@ -1242,23 +1235,33 @@ void hdmitx_register_vrr(struct hdmitx_dev *hdev)
 	struct vinfo_s *vinfo;
 	struct vrr_device_s *vrr = &hdev->hdmitx_vrr_dev;
 
-	vinfo = hdmitx_get_curvinfo(NULL);
+	vinfo = &hdev->tx_comm.hdmitx_vinfo;
 	if (!vinfo || vinfo->mode != VMODE_HDMI)
 		return;
 	vrr->output_src = VRR_OUTPUT_ENCP;
-	vrr->vfreq_max = prxcap->vrr_min;
-	vrr->vfreq_min = prxcap->vrr_max;
-	vrr->vline_max =
-		vinfo->vtotal * (prxcap->vrr_max / prxcap->vrr_min);
-	if (prxcap->vrr_max == 0)
-		vrr->vline_min = 0;
-	else
-		vrr->vline_min = vinfo->vtotal;
+	vrr->vfreq_max = prxcap->vrr_max;
+	vrr->vfreq_min = prxcap->vrr_min;
+	vrr->vline_max = 0;
+	vrr->vline_min = 0;
 	vrr->vline = vinfo->vtotal;
-	if (prxcap->vrr_max < 100 || prxcap->vrr_min > 48)
-		vrr->enable = 0;
-	else
-		vrr->enable = 1;
+	vrr->enable = 0;
+	/* Only extend vertical blanking relative to the current base timing.
+	 * Multiply before dividing: e.g. 120/48 must not truncate to 2.
+	 * No sink, no VRR block, or an invalid range must not divide by zero.
+	 */
+	if (prxcap->vrr_min && prxcap->vrr_min < prxcap->vrr_max &&
+	    vinfo->sync_duration_den && vinfo->vtotal &&
+	    (u64)vinfo->sync_duration_num >=
+		(u64)prxcap->vrr_min * vinfo->sync_duration_den &&
+	    (u64)vinfo->sync_duration_num <=
+		(u64)prxcap->vrr_max * vinfo->sync_duration_den) {
+		vrr->vline_min = vinfo->vtotal;
+		vrr->vline_max = div_u64((u64)vinfo->vtotal * vinfo->sync_duration_num,
+				       prxcap->vrr_min * vinfo->sync_duration_den);
+		/* Preserve the existing activation gate until local VRR is qualified. */
+		vrr->enable = prxcap->vrr_max >= 100 && prxcap->vrr_min <= 48 &&
+			vrr->vline_max > vrr->vline_min && vrr->vline_max <= 0xffff;
+	}
 	strncpy(vrr->name, name, VRR_NAME_LEN_MAX);
 	ret = aml_vrr_register_device(vrr, hdev->tx_comm.enc_idx);
 	HDMITX_INFO("%s ret = %d\n", __func__, ret);

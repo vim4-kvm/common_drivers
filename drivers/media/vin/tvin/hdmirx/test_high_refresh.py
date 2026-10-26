@@ -10,19 +10,47 @@ import unittest
 SOURCE = Path(__file__).with_name('hdmi_rx_wrapper.c').read_text()
 
 
-def function(name):
-    start = SOURCE.rfind('\n', 0, SOURCE.index(name + '(')) + 1
-    brace = SOURCE.index('{', start)
+def function(name, source=SOURCE):
+    start = source.rfind('\n', 0, source.index(name + '(')) + 1
+    brace = source.index('{', start)
     depth, end = 1, brace + 1
     while depth:
-        depth += (SOURCE[end] == '{') - (SOURCE[end] == '}')
+        depth += (source[end] == '{') - (source[end] == '}')
         end += 1
-    return SOURCE[start:end]
+    return source[start:end]
 
 
 class HighRefreshTest(unittest.TestCase):
+    def test_vtem_base_rate_decodes_low_byte_and_masks_unrelated_flags(self):
+        packet = Path(__file__).with_name('hdmi_rx_pktinfo.c').read_text()
+        fixture = '''
+#include <assert.h>
+typedef unsigned char u8;
+typedef unsigned short u16;
+'''
+        main = '''
+int main(void) {
+ u8 md[4] = {1, 4, 0xf8, 60};
+ assert(rx_vtem_base_rate(md) == 60);
+ md[3] = 120;
+ assert(rx_vtem_base_rate(md) == 120);
+ md[2] = 0xfd; md[3] = 44;
+ assert(rx_vtem_base_rate(md) == 300);
+ md[2] = 0xff; md[3] = 255;
+ assert(rx_vtem_base_rate(md) == 1023);
+ return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as temporary:
+            source, binary = Path(temporary) / 'vtem.c', Path(temporary) / 'vtem'
+            source.write_text(fixture + function('rx_vtem_base_rate', packet) + main)
+            subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Werror',
+                            str(source), '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_measured_rate_selects_high_refresh_for_all_progressive_1080_aliases(self):
-        functions = function('get_fps_index') + '\n' + function('hdmirx_hw_get_fmt')
+        functions = '\n'.join(function(name) for name in
+                              ('rx_vrr_base_frame_rate', 'get_fps_index', 'hdmirx_hw_get_fmt'))
         enums = '\n'.join('enum ' + name + ' {' + ','.join(sorted(set(re.findall(pattern, functions)))) + '};'
                           for name, pattern in [('fps_e', r'\bE_\d+HZ\b'),
                                                 ('hdmi_vic_e', r'\bHDMI_\w+\b'),
@@ -31,7 +59,12 @@ class HighRefreshTest(unittest.TestCase):
 #include <assert.h>
 #include <stdlib.h>
 typedef unsigned char u8;
-static struct { struct { int frame_rate, sw_vic; } pre; } rx[2];
+static struct {
+ struct { int frame_rate, sw_vic; } pre;
+ struct { int hw_vic; } cur;
+ struct { int vrr_en, fva_factor_m1, base_framerate; } vtem_info;
+ int free_sync_sts;
+} rx[2];
 static int force_vic, diff_frame_th=40, en_4k_timing=1;
 '''
         assertions = r'''
@@ -55,6 +88,26 @@ int main(void) {
  rx[1].pre.sw_vic=HDMI_2160p60_16x9;
  rx[1].pre.frame_rate=6000;
  assert(hdmirx_hw_get_fmt(1)==TVIN_SIG_FMT_HDMI_3840_2160_00HZ);
+ rx[1].pre.sw_vic=HDMI_1080p120;
+ rx[1].cur.hw_vic=HDMI_1080p120;
+ rx[1].vtem_info.vrr_en=1;
+ rx[1].vtem_info.base_framerate=120;
+ for (int rate=4800;rate<=12000;rate+=13) {
+  rx[1].pre.frame_rate=rate;
+  assert(hdmirx_hw_get_fmt(1)==TVIN_SIG_FMT_HDMI_1920X1080P_120HZ);
+ }
+ rx[1].vtem_info.vrr_en=0;
+ rx[1].free_sync_sts=3; /* supported and enabled, not active */
+ rx[1].pre.frame_rate=5000;
+ assert(hdmirx_hw_get_fmt(1)==TVIN_SIG_FMT_HDMI_1920X1080P_120HZ);
+ rx[1].free_sync_sts=7;
+ assert(hdmirx_hw_get_fmt(1)==TVIN_SIG_FMT_HDMI_1920X1080P_120HZ);
+ rx[1].free_sync_sts=1; /* support alone must not override fixed input */
+ assert(hdmirx_hw_get_fmt(1)==TVIN_SIG_FMT_HDMI_1920X1080P_50HZ);
+ rx[1].vtem_info.vrr_en=1;
+ rx[1].vtem_info.base_framerate=0;
+ rx[1].cur.hw_vic=HDMI_UNKNOWN;
+ assert(rx_vrr_base_frame_rate(1)==0);
  return 0;
 }
 '''

@@ -377,19 +377,19 @@ static void vrr_line_delay_update(struct aml_vrr_drv_s *vdrv)
 	if (vdrv->data->chip_type == VRR_CHIP_T3X)
 		temp = vrr_reg_getb(VENC_VRR_CTRL_T3X + offset, 16, 32);
 	else
-		temp = vrr_reg_getb(reg + offset, 8, 16);
+		temp = vrr_reg_getb(reg, 8, 16);
 
 	vrr_line_dly = vdrv->line_dly + crop_line;
 
 	if (temp == vrr_line_dly)
 		return;
 
-	if (crop_line > pre_line) {
+	if (vrr_line_dly > temp) {
 		if (vdrv->data->chip_type == VRR_CHIP_T3X)
 			vrr_reg_setb(VENC_VRR_CTRL_T3X, vrr_line_dly, 16, 32);
 		else
 			vrr_reg_setb(reg, vrr_line_dly, 8, 16);
-	} else if (crop_line < pre_line) {
+	} else if (vrr_line_dly < temp) {
 		if (vdrv->data->chip_type == VRR_CHIP_T3X)
 			VSYNC_WRITE_VPP_REG_BITS_VPP_SEL(VENC_VRR_CTRL_T3X,
 				vrr_line_dly, 16, 32, vrr_vpp_index);

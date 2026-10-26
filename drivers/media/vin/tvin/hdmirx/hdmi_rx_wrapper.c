@@ -2615,32 +2615,72 @@ static bool fmt_vic_abnormal(u8 port)
 	return false;
 }
 
+/* A VRR frame period is not a mode change. Keep the nominal capture budget
+ * separate from the measured rate, including when FreeSync is enabled but
+ * temporarily inactive. Return zero for an unrecognised base timing.
+ */
+static unsigned int rx_vrr_base_frame_rate(u8 port)
+{
+	if (rx[port].vtem_info.vrr_en &&
+	    !rx[port].vtem_info.fva_factor_m1 &&
+	    rx[port].vtem_info.base_framerate >= 1 &&
+	    rx[port].vtem_info.base_framerate <= 120)
+		return rx[port].vtem_info.base_framerate * 100;
+	if (!rx[port].vtem_info.vrr_en && !(rx[port].free_sync_sts & 2))
+		return 0;
+
+	switch (rx[port].cur.hw_vic) {
+	case HDMI_1080p120:
+	case HDMI_1080p120_64x27:
+		return 12000;
+	case HDMI_1080p100:
+	case HDMI_1080p100_64x27:
+		return 10000;
+	case HDMI_720p60:
+	case HDMI_1080p60:
+	case HDMI_1080p60_64x27:
+	case HDMI_2160p60_16x9:
+		return 6000;
+	case HDMI_720p50:
+	case HDMI_1080p50:
+	case HDMI_1080p50_64x27:
+	case HDMI_2160p50_16x9:
+		return 5000;
+	default:
+		return 0;
+	}
+}
+
 enum fps_e get_fps_index(u8 port)
 {
 	enum fps_e ret = E_60HZ;
+	unsigned int rate = rx_vrr_base_frame_rate(port);
 
-	if ((abs(rx[port].pre.frame_rate - 2400)
+	if (!rate)
+		rate = rx[port].pre.frame_rate;
+
+	if ((abs((int)rate - 2400)
 		< diff_frame_th))
 		ret = E_24HZ;
-	else if ((abs(rx[port].pre.frame_rate - 2500)
+	else if ((abs((int)rate - 2500)
 		  < diff_frame_th))
 		ret = E_25HZ;
-	else if ((abs(rx[port].pre.frame_rate - 3000)
+	else if ((abs((int)rate - 3000)
 		  < diff_frame_th))
 		ret = E_30HZ;
-	else if ((abs(rx[port].pre.frame_rate - 5000)
+	else if ((abs((int)rate - 5000)
 		  < diff_frame_th))
 		ret = E_50HZ;
-	else if ((abs(rx[port].pre.frame_rate - 7200)
+	else if ((abs((int)rate - 7200)
 		  < diff_frame_th))
 		ret = E_72HZ;
-	else if ((abs(rx[port].pre.frame_rate - 7500)
+	else if ((abs((int)rate - 7500)
 		  < diff_frame_th))
 		ret = E_75HZ;
-	else if ((abs(rx[port].pre.frame_rate - 10000)
+	else if ((abs((int)rate - 10000)
 		  < diff_frame_th))
 		ret = E_100HZ;
-	else if ((abs(rx[port].pre.frame_rate - 12000)
+	else if ((abs((int)rate - 12000)
 		  < diff_frame_th))
 		ret = E_120HZ;
 	else
@@ -7597,6 +7637,13 @@ unsigned int hdmirx_show_info(unsigned char *buf, int size, u8 port)
 		"Color Depth: %d\n", rx[port].cur.colordepth);
 	pos += snprintf(buf + pos, size - pos,
 		"Frame Rate: %d\n", rx[port].cur.frame_rate);
+	pos += snprintf(buf + pos, size - pos,
+		"VRR enabled: %u\nFreeSync enabled: %u\nFreeSync active: %u\n"
+		"Base Frame Rate: %u\nCapture Frame Rate: %u\n",
+		rx[port].vtem_info.vrr_en, !!(rx[port].free_sync_sts & 2),
+		!!(rx[port].free_sync_sts & 4), rx_vrr_base_frame_rate(port),
+		(rx[port].vtem_info.vrr_en || (rx[port].free_sync_sts & 2)) ?
+		rx_vrr_base_frame_rate(port) : rx[port].cur.frame_rate);
 	pos += snprintf(buf + pos, size - pos,
 		"Skip frame: %d\n", rx[port].skip);
 	pos += snprintf(buf + pos, size - pos,

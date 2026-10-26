@@ -2510,6 +2510,11 @@ void dump_dsc_pps_info(u8 port)
 	rx_pr("------Picture Parameter Set End------\n");
 }
 
+static u16 rx_vtem_base_rate(const u8 *metadata)
+{
+	return ((metadata[2] & 0x3) << 8) | metadata[3];
+}
+
 void rx_get_em_info(u8 port)
 {
 	u8 i, tmp;
@@ -2543,8 +2548,7 @@ void rx_get_em_info(u8 port)
 			rx[port].vtem_info.fva_factor_m1 = (tmp >> 4) & 0xf;
 			tmp = pkt->cnt.md[1];
 			rx[port].vtem_info.base_vfront = tmp;
-			rx[port].vtem_info.base_framerate = (pkt->cnt.md[2] & 0x3) |
-				(pkt->cnt.md[3] << 8);
+			rx[port].vtem_info.base_framerate = rx_vtem_base_rate(pkt->cnt.md);
 			pkt->pkttype = 0;
 			break;
 		case EMP_VTEM_CLASS1:
@@ -2558,7 +2562,7 @@ void rx_get_em_info(u8 port)
 			rx[port].vtem_info.base_vfront = tmp;
 			tmp = pkt->cnt.md[2];
 			rx[port].vtem_info.next_tfr = next_tfr[tmp >> 3];
-			rx[port].vtem_info.base_framerate = ((tmp & 0x3) << 8) | pkt->cnt.md[3];
+			rx[port].vtem_info.base_framerate = rx_vtem_base_rate(pkt->cnt.md);
 			if (qms_en != rx[port].vtem_info.qms_en ||
 				m_const != rx[port].vtem_info.m_const) {
 				rx_pr("qms_en:%d, m_const:%d, next_tfr:%d\n",

@@ -1154,6 +1154,16 @@ static void vdin_scale_and_cutwin_handle(struct vdin_dev_s *devp)
 		devp->prop.scaling4w = devp->parm.dest_width;
 		devp->prop.scaling4h = devp->parm.dest_height;
 	}
+	/* The shared HDMI frontend keeps the primary capture's old destination.
+	 * V4L2 owns the secondary output geometry, including native-size capture:
+	 * stale UHD dimensions otherwise enable vertical scaling and clamp the
+	 * horizontal output to the 1920-pixel scaler line buffer.
+	 */
+	if (devp->shared_hdmi_frontend &&
+	    devp->work_mode == VDIN_WORK_MD_V4L) {
+		devp->prop.scaling4w = devp->v4l2_fmt.fmt.pix_mp.width;
+		devp->prop.scaling4h = devp->v4l2_fmt.fmt.pix_mp.height;
+	}
 
 	h_active = devp->fmt_info_p->h_active /
 			(devp->prop.decimation_ratio + 1);

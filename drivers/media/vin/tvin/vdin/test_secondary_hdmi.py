@@ -21,6 +21,60 @@ def function(name):
 
 
 class SecondaryHdmiTest(unittest.TestCase):
+    def test_secondary_geometry_overrides_stale_primary_destination(self):
+        fixture = r'''
+#include <assert.h>
+#include <stdbool.h>
+typedef unsigned int u32;
+enum { VDIN_SACALE_4096_2_3840=1, VDIN_CUTWIN_4096_2_3840=2,
+       TVIN_SIG_FMT_HDMI_4096_2160_00HZ=10, VDIN_WORK_MD_V4L=1,
+       VDIN_FLAG_MANUAL_CONVERSION=4 };
+#define IS_HDMI_SRC(port) ((port)==1)
+struct tvin_format_s { unsigned int h_active, v_active; };
+struct vdin_dev_s {
+ struct tvin_format_s *fmt_info_p;
+ struct { u32 vdin0_max_w_h; } *dtdata;
+ int vdin_function_sel, work_mode, flags;
+ bool shared_hdmi_frontend;
+ struct { int port, dest_width, dest_height; struct { int fmt; } info; } parm;
+ struct { u32 scaling4w, scaling4h, decimation_ratio, dest_cfmt, hs, he, vs, ve; } prop;
+ struct { int hw5_ctl, dw_out_w, dw_out_h, dw_dfmt; } dv_hw5;
+ struct { u32 scaling4w, scaling4h, dest_cfmt;
+          struct { u32 hs, he, vs, ve; } cutwin; } debug;
+ struct { struct { struct { unsigned int width, height; } pix_mp; } fmt; } v4l2_fmt;
+};
+'''
+        assertions = r'''
+int main(void) {
+ struct tvin_format_s timing={2560,1440};
+ struct vdin_dev_s device={.fmt_info_p=&timing, .shared_hdmi_frontend=true,
+                          .work_mode=VDIN_WORK_MD_V4L};
+ device.dtdata=&(typeof(*device.dtdata)){0};
+ device.parm.port=1; device.parm.dest_width=3840; device.parm.dest_height=2160;
+ /* The old UHD destination must not enable the vertical scaler and its
+  * 1920-pixel line-buffer clamp for native QHD or ultrawide capture. */
+ const unsigned int sizes[][2]={{2560,1440},{3440,1440},{2560,1080},
+                              {3840,2160},{1280,720},{2560,1440}};
+ for (unsigned int i=0;i<sizeof(sizes)/sizeof(sizes[0]);i++) {
+  device.v4l2_fmt.fmt.pix_mp.width=sizes[i][0];
+  device.v4l2_fmt.fmt.pix_mp.height=sizes[i][1];
+  vdin_scale_and_cutwin_handle(&device);
+  assert(device.prop.scaling4w==sizes[i][0]);
+  assert(device.prop.scaling4h==sizes[i][1]);
+ }
+ device.shared_hdmi_frontend=false;
+ vdin_scale_and_cutwin_handle(&device);
+ assert(device.prop.scaling4w==3840 && device.prop.scaling4h==2160);
+ return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            source, binary = Path(directory) / 'geometry.c', Path(directory) / 'geometry'
+            source.write_text(fixture + function('vdin_scale_and_cutwin_handle') + assertions)
+            subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Werror',
+                            str(source), '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_live_secondary_updates_hdr_matrix_range_and_depth_at_frame_boundary(self):
         fixture = r'''
 #include <assert.h>

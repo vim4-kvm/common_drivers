@@ -1398,12 +1398,26 @@ static int vdin_vidioc_enum_framesizes(struct file *file, void *fh,
 static int vdin_vidioc_enum_frameintervals(struct file *file, void *priv,
 				      struct v4l2_frmivalenum *fival)
 {
-	if (fival->index >= ARRAY_SIZE(fract_discrete))
+	struct vdin_dev_s *devp = video_drvdata(file);
+	unsigned int count = ARRAY_SIZE(fract_discrete);
+	/* Standard v4l2src negotiates from this list before STREAMON. Keep
+	 * writeback and UHD at their existing rates; HDMI VDIN1 also captures
+	 * native 1080p100/120. Adding RX formats alone leaves these rates hidden.
+	 */
+	bool high_refresh = devp->index == 1 &&
+		IS_HDMI_SRC(devp->v4l2_port[0]) &&
+		fival->width == 1920 && fival->height == 1080;
+
+	if (fival->index >= count + (high_refresh ? 2 : 0))
 		return -EINVAL;
 
 	fival->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-	fival->discrete.numerator   = fract_discrete[fival->index].numerator;
-	fival->discrete.denominator = fract_discrete[fival->index].denominator;
+	if (fival->index < count) {
+		fival->discrete = fract_discrete[fival->index];
+	} else {
+		fival->discrete.numerator = 1;
+		fival->discrete.denominator = fival->index == count ? 100 : 120;
+	}
 
 	return 0;
 }

@@ -1887,7 +1887,7 @@ static enum vd_format_e vdin_hdmi_signal_format(struct vdin_dev_s *devp)
 	return SIGNAL_HDR10;
 }
 
-bool vdin0_native_hdr;
+static bool vdin0_native_hdr;
 module_param(vdin0_native_hdr, bool, 0444);
 
 void vdin_set_hdr(struct vdin_dev_s *devp)

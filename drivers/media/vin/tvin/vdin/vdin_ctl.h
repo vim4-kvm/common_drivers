@@ -189,7 +189,6 @@ extern unsigned int game_mode;
 extern unsigned int vdin_force_game_mode;
 extern int vdin_dbg_en;
 extern unsigned int vdin_pc_mode;
-extern bool vdin0_native_hdr;
 extern int irq_max_count;
 
 /* ************************************************************************ */

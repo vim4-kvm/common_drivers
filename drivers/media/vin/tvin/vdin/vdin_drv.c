@@ -6580,6 +6580,15 @@ static int vdin_drv_probe(struct platform_device *pdev)
 			pr_err("don't find  match flag_cma\n");
 			devp->cma_config_flag = 0;
 		}
+		/* Native 4K capture and HEVC share the codec CMA area. Separate
+		 * frame allocations can straddle the encoder's 200 MiB workspace
+		 * during HDR/SDR changes, leaving enough free memory but no large
+		 * contiguous extent. Keep the primary frame pool together. Select
+		 * the matching allocation/release mode before the first capture.
+		 */
+		if (!devp->index && vdin0_native_hdr &&
+		    (devp->cma_config_flag & MEM_ALLOC_FROM_CODEC))
+			devp->cma_config_flag &= ~MEM_ALLOC_DISCRETE;
 		if (devp->cma_config_flag & 0x1) {
 			ret = of_property_read_u32(pdev->dev.of_node,
 						   "cma_size",

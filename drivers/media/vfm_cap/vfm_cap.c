@@ -64,6 +64,9 @@ MODULE_PARM_DESC(video_nr, "V4L2 video device number (-1=auto)");
 
 unsigned int vfm_cap_debug;
 module_param_named(debug, vfm_cap_debug, uint, 0644);
+static unsigned int hdr_metadata_version = 1;
+module_param(hdr_metadata_version, uint, 0444);
+MODULE_PARM_DESC(hdr_metadata_version, "V4L2 PQ colorimetry and packed 10-bit stride API version");
 MODULE_PARM_DESC(debug, "Debug level (0=off, 1=info, 2=verbose)");
 
 /* ========== Global device instance ========== */
@@ -523,7 +526,8 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 
 	spin_lock_irqsave(&dev->fmt_spin, flags);
 	if (dev->fmt_valid && dev->width == w && dev->height == h &&
-	    dev->pixelformat == pixfmt && dev->bitdepth == bd_raw) {
+	    dev->pixelformat == pixfmt && dev->bitdepth == bd_raw &&
+	    dev->signal_type == vf->signal_type) {
 		spin_unlock_irqrestore(&dev->fmt_spin, flags);
 		return false; /* no change */
 	}
@@ -536,6 +540,7 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 	dev->pixelformat = pixfmt;
 	dev->bitdepth = bd_raw;
 	dev->bitdepth_y = bd_y;
+	dev->signal_type = vf->signal_type;
 
 	switch (pixfmt) {
 	case V4L2_PIX_FMT_AML_VUY24:
@@ -550,7 +555,7 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 		 * bytesperline = width * 5 / 2 (width always even from vdin).
 		 */
 		dev->num_planes = 1;
-		bpl = w * 5 / 2;
+		bpl = max(w * 5 / 2, vf->canvas0_config[0].width);
 		size = bpl * h;
 		dev->bytesperline[0] = bpl;
 		dev->sizeimage[0] = PAGE_ALIGN(size);
@@ -590,7 +595,8 @@ static bool vfm_cap_update_format(struct vfm_cap_dev *dev,
 		break;
 	}
 
-	dev->colorspace = V4L2_COLORSPACE_DEFAULT;
+	dev->colorspace = ((vf->signal_type >> 16) & 0xff) == 9 ?
+		V4L2_COLORSPACE_BT2020 : V4L2_COLORSPACE_REC709;
 	dev->field = (vf->type & VIDTYPE_INTERLACE) ?
 		     V4L2_FIELD_INTERLACED : V4L2_FIELD_NONE;
 	dev->fmt_valid = true;
@@ -1515,6 +1521,20 @@ static int vfm_cap_recv_event_cb(int type, void *data, void *private_data)
 			 */
 			atomic_set(&frame->refcount, 1);
 
+			/* With HDMI OUT disconnected, amvideo has no scanout clock
+			 * and may not dequeue anything. Keep only the newest unclaimed
+			 * display frame so remote capture cannot exhaust VDIN's pool.
+			 * Frames already acquired by amvideo are no longer on this list;
+			 * their display and DMA-buf references remain untouched. */
+			while (!list_empty(&dev->ready_list)) {
+				struct cap_frame *old = list_first_entry(
+					&dev->ready_list, struct cap_frame, list);
+
+				list_del_init(&old->list);
+				if (atomic_dec_and_test(&old->refcount))
+					frame_release(dev, old);
+			}
+
 			/* Add to ready list for downstream to pick up */
 			list_add_tail(&frame->list, &dev->ready_list);
 
@@ -1790,6 +1810,12 @@ static int vfm_cap_g_fmt(struct file *file, void *fh,
 		mp->plane_fmt[0].sizeimage = dev->sizeimage[0];
 		mp->field = dev->field;
 		mp->colorspace = dev->colorspace;
+		mp->xfer_func = ((dev->signal_type >> 8) & 0xff) == 16 ?
+			V4L2_XFER_FUNC_SMPTE2084 : V4L2_XFER_FUNC_709;
+		mp->ycbcr_enc = dev->colorspace == V4L2_COLORSPACE_BT2020 ?
+			V4L2_YCBCR_ENC_BT2020 : V4L2_YCBCR_ENC_709;
+		mp->quantization = dev->signal_type & BIT(25) ?
+			V4L2_QUANTIZATION_FULL_RANGE : V4L2_QUANTIZATION_LIM_RANGE;
 	}
 	spin_unlock_irqrestore(&dev->fmt_spin, flags);
 
@@ -2170,23 +2196,9 @@ static int vfm_cap_release(struct file *file)
 	vfm_cap_info("consumer %u closed (remaining: %u)\n",
 		     cons->id, dev->num_consumers);
 
-	/*
-	 * Auto-drain: when the last V4L2 consumer closes, recycle any
-	 * stuck pool frames back to vdin0.  With zero consumers there
-	 * can be no V4L2/DMA-buf references, so every in_use frame is
-	 * held only by the display path.  Returning them now prevents
-	 * vdin0 write-buffer exhaustion (the "freeze after first run" bug).
-	 */
-	if (dev->num_consumers == 0) {
-		/* Cancel pending delivery — no consumers to deliver to */
-		cancel_work_sync(&dev->deliver_work);
-
-		spin_lock_irqsave(&dev->ready_lock, flags);
-		frame_pool_recycle_all(dev);
-		spin_unlock_irqrestore(&dev->ready_lock, flags);
-
-		vfm_cap_info("auto-drain: recycled all frames to vdin0\n");
-	}
+	/* Display frames and independently exported DMA-bufs may outlive this
+	 * file. Their normal put paths own recycling; closing a capture file
+	 * must never force-reset the shared pool's reference counts. */
 
 	kfree(cons);
 	return 0;

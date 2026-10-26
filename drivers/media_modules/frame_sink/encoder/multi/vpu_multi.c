@@ -3078,9 +3078,8 @@ static s32 vpu_probe(struct platform_device *pdev)
 	np = pdev->dev.of_node;
 	err = of_property_read_u32(np, "config_mm_sz_mb", &cma_cfg_size);
 
-	cma_cfg_size = 100;
-	enc_pr(LOG_DEBUG, "reset cma_cfg_size to 100");
-
+	/* Honor the board's pool size: UHD Main10 reconstruction and firmware
+	 * task buffers alone exceed the old hard-coded 100 MiB limit. */
 	if (err) {
 		enc_pr(LOG_DEBUG, "failed to get config_mm_sz_mb node, use default\n");
 		cma_cfg_size = VPU_INIT_VIDEO_MEMORY_SIZE_IN_BYTE;

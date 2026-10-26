@@ -94,6 +94,10 @@ static struct v4l2_frmsize_discrete vdin_v4l2_frmsize_dis[] = {
 	{1280, 720},	{1920, 1080},	{3840, 2160}
 };
 
+static const struct v4l2_frmsize_discrete vdin_hdmi_frmsizes[] = {
+	{2560, 1080}, {2560, 1440}, {3440, 1440},
+};
+
 static struct v4l2_fract fract_discrete[] = {
 	{.numerator = 1, .denominator = 24,},
 	{.numerator = 1, .denominator = 25,},
@@ -1369,9 +1373,11 @@ static int vidioc_try_fmt_vid_cap_mplane(struct file *file, void *priv,
 static int vdin_vidioc_enum_framesizes(struct file *file, void *fh,
 				  struct v4l2_frmsizeenum *fsize)
 {
+	struct vdin_dev_s *devp = video_drvdata(file);
 	int ret = 0, i = 0;
 	struct vdin_v4l2_pix_fmt *fmt = NULL;
-	struct v4l2_frmsize_discrete *frmsize = NULL;
+	const struct v4l2_frmsize_discrete *frmsize;
+	unsigned int extra_index;
 
 	for (i = 0; i < ARRAY_SIZE(pix_formats); i++) {
 		if (pix_formats[i].fourcc == fsize->pixel_format) {
@@ -1381,10 +1387,18 @@ static int vdin_vidioc_enum_framesizes(struct file *file, void *fh,
 	}
 	if (!fmt)
 		return -EINVAL;
-	if (fsize->index >= ARRAY_SIZE(vdin_v4l2_frmsize_dis))
-		return -EINVAL;
-
-	frmsize = &vdin_v4l2_frmsize_dis[fsize->index];
+	if (fsize->index < ARRAY_SIZE(vdin_v4l2_frmsize_dis)) {
+		frmsize = &vdin_v4l2_frmsize_dis[fsize->index];
+	} else {
+		/* Preserve writeback's size list and existing enumeration indices.
+		 * v4l2src rejects native HDMI sizes absent here before TRY_FMT.
+		 */
+		extra_index = fsize->index - ARRAY_SIZE(vdin_v4l2_frmsize_dis);
+		if (devp->index != 1 || !IS_HDMI_SRC(devp->v4l2_port[0]) ||
+		    extra_index >= ARRAY_SIZE(vdin_hdmi_frmsizes))
+			return -EINVAL;
+		frmsize = &vdin_hdmi_frmsizes[extra_index];
+	}
 	/* TODO:vdin can only scale down
 	 * width & height should less than real format size.
 	 */
@@ -1402,11 +1416,12 @@ static int vdin_vidioc_enum_frameintervals(struct file *file, void *priv,
 	unsigned int count = ARRAY_SIZE(fract_discrete);
 	/* Standard v4l2src negotiates from this list before STREAMON. Keep
 	 * writeback and UHD at their existing rates; HDMI VDIN1 also captures
-	 * native 1080p100/120. Adding RX formats alone leaves these rates hidden.
+	 * native 1080p/1440p100/120. RX formats alone leave these rates hidden.
 	 */
 	bool high_refresh = devp->index == 1 &&
 		IS_HDMI_SRC(devp->v4l2_port[0]) &&
-		fival->width == 1920 && fival->height == 1080;
+		((fival->width == 1920 && fival->height == 1080) ||
+		 (fival->width == 2560 && fival->height == 1440));
 
 	if (fival->index >= count + (high_refresh ? 2 : 0))
 		return -EINVAL;

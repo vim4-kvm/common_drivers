@@ -2565,6 +2565,7 @@ static const struct freq_ref_s freq_ref[] = {
 	{0,	4,	0,	2048,	2160,	HDMI_4096p24_256x135},
 
 	{0,	0,	0,	2560,	1440,	HDMI_2560_1440},
+	{0,	0,	0,	3440,	1440,	HDMI_3440_1440},
 	{0,	0,	0,	2560,	3488,	HDMI_2560_1440},
 	{0,	0,	0,	2560,	2986,	HDMI_2560_1440},
 	/* for AG-506 */
@@ -3030,6 +3031,9 @@ enum tvin_sig_fmt_e hdmirx_hw_get_fmt(u8 port)
 		break;
 	case HDMI_2560_1440:
 		fmt = TVIN_SIG_FMT_HDMI_2560X1440_00HZ;
+		break;
+	case HDMI_3440_1440:
+		fmt = TVIN_SIG_FMT_HDMI_3440X1440_00HZ;
 		break;
 	case HDMI_1920x2160p60_16x9:
 		fmt = TVIN_SIG_FMT_HDMI_1920X2160_60HZ;

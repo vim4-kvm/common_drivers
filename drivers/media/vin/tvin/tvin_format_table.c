@@ -230,6 +230,8 @@ const char *tvin_sig_fmt_str(enum tvin_sig_fmt_e fmt)
 		return "TVIN_SIG_FMT_HDMI_2560X1080P_25HZ";
 	case TVIN_SIG_FMT_HDMI_3840X1080P_60HZ:
 		return "TVIN_SIG_FMT_HDMI_3840X1080P_60HZ";
+	case TVIN_SIG_FMT_HDMI_3440X1440_00HZ:
+		return "TVIN_SIG_FMT_HDMI_3440X1440_00HZ";
 	case TVIN_SIG_FMT_HDMI_MAX:
 		return "TVIN_SIG_FMT_HDMI_MAX";
 		/* Video Formats */
@@ -1005,6 +1007,12 @@ const struct tvin_format_s tvin_hdmi_fmt_tbl[TVIN_SIG_FMT_HDMI_MAX -
 	0, 0, 0, 0, 0, 0, 0,
 	0, TVIN_SYNC_POL_POSITIVE, TVIN_SYNC_POL_POSITIVE,
 	TVIN_SCAN_MODE_PROGRESSIVE, 5400, 0, 0, 1920
+	},
+	{/* TVIN_SIG_FMT_HDMI_3440X1440_00HZ, */
+	3440, 1440, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0,
+	0, TVIN_SYNC_POL_NULL, TVIN_SYNC_POL_NULL,
+	TVIN_SCAN_MODE_PROGRESSIVE, 0, 0, 0, 1600
 	},
 	{/* TVIN_SIG_FMT_HDMI_MAX,//227 */
 	0,    0, 0,  0, 0,  0, 0,

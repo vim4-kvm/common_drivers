@@ -299,6 +299,7 @@ struct vfm_cap_dev {
 	u32				sizeimage[VIDEO_MAX_PLANES];
 	u32				num_planes;
 	u32				colorspace;
+	u32				signal_type;
 	u32				field;
 	u32				bitdepth;    /* raw vf->bitdepth value */
 	u32				bitdepth_y;  /* 8, 10, or 12 */

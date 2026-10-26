@@ -8,19 +8,79 @@ import unittest
 SOURCE = Path(__file__).with_name('vdin_drv.c').read_text()
 
 
-def function(name):
-    start = SOURCE.index('\n' + name + '(') if '\n' + name + '(' in SOURCE else SOURCE.index(name + '(')
-    start = SOURCE.rfind('\n', 0, start) + 1
-    brace = SOURCE.index('{', start)
+def function(name, content=SOURCE):
+    start = content.index('\n' + name + '(') if '\n' + name + '(' in content else content.index(name + '(')
+    start = content.rfind('\n', 0, start) + 1
+    brace = content.index('{', start)
     depth = 1
     end = brace + 1
     while depth:
-        depth += (SOURCE[end] == '{') - (SOURCE[end] == '}')
+        depth += (content[end] == '{') - (content[end] == '}')
         end += 1
-    return SOURCE[start:end]
+    return content[start:end]
 
 
 class SecondaryHdmiTest(unittest.TestCase):
+    def test_native_width_and_padded_v4l2_planes_agree(self):
+        fixture = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <linux/videodev2.h>
+#include <stddef.h>
+#define IS_ERR_OR_NULL(p) (!(p))
+#define IS_HDMI_SRC(port) ((port)==1)
+#define roundup(x,a) ((((x)+(a)-1)/(a))*(a))
+#define rounddown(x,a) (((x)/(a))*(a))
+#define PAGE_ALIGN(x) roundup(x,4096)
+#define dprintk(...) ((void)0)
+#define pr_info(...) ((void)0)
+struct vdin_dev_s {
+ int index, v4l2_port[1], canvas_align;
+ bool shared_hdmi_frontend;
+ unsigned int h_active, v_active;
+ struct { unsigned int scaling4w, scaling4h; } prop;
+ struct { unsigned int vdin1_line_buff; } debug;
+ struct { unsigned int vdin1_line_buff_size; } *dtdata;
+ struct v4l2_format v4l2_fmt;
+};
+'''
+        assertions = r'''
+int main(void) {
+ const unsigned int widths[]={1920,2560,3440,3840};
+ for(int shared=0; shared<2; shared++)
+ for(unsigned int i=0; i<4; i++)
+ for(unsigned int planes=1; planes<=2; planes++) {
+  unsigned int width=widths[i], pitch=shared?roundup(width,64):width;
+  struct vdin_dev_s d={.index=1,.v4l2_port={shared},.canvas_align=64,
+   .shared_hdmi_frontend=shared,.h_active=width,.v_active=1440,
+   .prop={width,1440}};
+  d.dtdata=&(typeof(*d.dtdata)){1920};
+  d.v4l2_fmt.fmt.pix_mp=(struct v4l2_pix_format_mplane){
+   .width=width,.height=1440,.num_planes=planes,
+   .pixelformat=planes==1?V4L2_PIX_FMT_NV21:V4L2_PIX_FMT_NV21M};
+  vdin_fill_pix_format(&d);
+  assert(d.v4l2_fmt.fmt.pix_mp.width==width);
+  assert(d.v4l2_fmt.fmt.pix_mp.plane_fmt[0].bytesperline==pitch);
+  assert(d.v4l2_fmt.fmt.pix_mp.plane_fmt[0].sizeimage==
+         PAGE_ALIGN(planes==1?pitch*1440*3/2:pitch*1440));
+  assert(d.v4l2_fmt.fmt.pix_mp.plane_fmt[1].sizeimage==
+         (planes==1?0:PAGE_ALIGN(pitch*720)));
+  vdin_scaling_adjust(&d);
+  assert(d.prop.scaling4w==(shared?width:rounddown(width,64)));
+ }
+ return 0;
+}
+'''
+        layout = Path(__file__).with_name('vdin_v4l2_if.c').read_text()
+        control = Path(__file__).with_name('vdin_ctl.c').read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            source, binary = Path(directory) / 'pitch.c', Path(directory) / 'pitch'
+            source.write_text(fixture + function('vdin_fill_pix_format', layout)
+                              + function('vdin_scaling_adjust', control) + assertions)
+            subprocess.run([os.environ.get('CC', 'cc'), '-std=gnu11', '-Wall', '-Werror',
+                            str(source), '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_secondary_geometry_overrides_stale_primary_destination(self):
         fixture = r'''
 #include <assert.h>

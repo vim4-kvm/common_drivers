@@ -4809,7 +4809,15 @@ int vdin_scaling_adjust(struct vdin_dev_s *devp)
 	if (devp->index == 0)
 		return 0;
 
-	scaling4w = rounddown(devp->prop.scaling4w, devp->canvas_align);
+	/* Native HDMI width is visible geometry, not the padded DMA pitch.
+	 * Rounding 3440 down to 3392 corrupts the V4L2 buffer layout; the canvas
+	 * allocator independently rounds its byte stride up to canvas_align.
+	 */
+	if (devp->shared_hdmi_frontend &&
+	    devp->prop.scaling4w == devp->h_active)
+		scaling4w = devp->prop.scaling4w;
+	else
+		scaling4w = rounddown(devp->prop.scaling4w, devp->canvas_align);
 	if (devp->prop.scaling4w != scaling4w) {
 		pr_info("vdin1,%s.scaling4w=%d round down to %d\n",
 			__func__, devp->prop.scaling4w, scaling4w);

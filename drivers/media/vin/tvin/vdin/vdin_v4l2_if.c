@@ -240,12 +240,19 @@ char *vb2_memory_sts_to_str(uint32_t memory)
 void vdin_fill_pix_format(struct vdin_dev_s *devp)
 {
 	struct v4l2_format *v4l2_fmt = NULL;
+	unsigned int stride;
 	//unsigned int scan_mod = TVIN_SCAN_MODE_PROGRESSIVE;
 
 	if (IS_ERR_OR_NULL(devp))
 		return;
 
 	v4l2_fmt = &devp->v4l2_fmt;
+	stride = v4l2_fmt->fmt.pix_mp.width;
+	/* Match the native HDMI canvas pitch without changing visible width.
+	 * Downstream VideoMeta and the chroma offset must describe the DMA layout.
+	 */
+	if (devp->index == 1 && IS_HDMI_SRC(devp->v4l2_port[0]))
+		stride = roundup(stride, devp->canvas_align);
 
 	if (v4l2_fmt->fmt.pix_mp.num_planes == 1) {
 		if (v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_UYVY) {
@@ -256,9 +263,9 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 		} else if (v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12 ||
 				   v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV21) {
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
-				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height * 3 / 2;
+				stride * v4l2_fmt->fmt.pix_mp.height * 3 / 2;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width;
+				stride;
 		}
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].sizeimage = 0;
 		v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline = 0;
@@ -266,23 +273,23 @@ void vdin_fill_pix_format(struct vdin_dev_s *devp)
 		if (v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV16M ||
 			v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV61M) {
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
-				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height;
+				stride * v4l2_fmt->fmt.pix_mp.height;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].sizeimage =
-				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height;
+				stride * v4l2_fmt->fmt.pix_mp.height;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width;
+				stride;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width;
+				stride;
 		} else if (v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV12M ||
 				   v4l2_fmt->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_NV21M) {
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
-				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height;
+				stride * v4l2_fmt->fmt.pix_mp.height;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].sizeimage =
-				v4l2_fmt->fmt.pix_mp.width * v4l2_fmt->fmt.pix_mp.height / 2;
+				stride * v4l2_fmt->fmt.pix_mp.height / 2;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width;
+				stride;
 			v4l2_fmt->fmt.pix_mp.plane_fmt[1].bytesperline =
-				v4l2_fmt->fmt.pix_mp.width;
+				stride;
 		}
 	} else {
 		dprintk(0, "vdin%d,err.not support num_planes=%d\n ",
